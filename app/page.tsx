@@ -462,6 +462,32 @@ export default function Home() {
           </div>
         </div>
 
+        <div className="mb-6 flex gap-4">
+          <button
+            onClick={loadStats}
+            disabled={isGenerating}
+            className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-semibold transition-all transform hover:scale-105 active:scale-95 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            🔄 Actualiser les prompts depuis le Google Sheet
+          </button>
+        </div>
+
+        {stats.total === 0 && (
+          <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-6">
+            <div className="flex items-start gap-3">
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <h3 className="font-bold text-yellow-800 text-lg mb-2">Aucun prompt détecté</h3>
+                <ol className="text-yellow-700 space-y-1 text-sm list-decimal list-inside">
+                  <li>Ajoutez des prompts dans votre Google Sheet (colonne "Prompt")</li>
+                  <li>Cliquez sur "🔄 Actualiser les prompts" ci-dessus</li>
+                  <li>Vos prompts apparaîtront dans les statistiques</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold">📸 Bibliothèque Produits</h2>
