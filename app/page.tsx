@@ -559,7 +559,7 @@ export default function Home() {
                   type="text"
                   value={newGroupName}
                   onChange={(e) => setNewGroupName(e.target.value)}
-                  placeholder="Ex: Brumes Pikoc, Bougies, etc."
+                  placeholder="Ex: Brumes, Bougies, Savons, etc."
                   className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-500 focus:outline-none"
                   onKeyPress={(e) => e.key === 'Enter' && createNewGroup()}
                 />
