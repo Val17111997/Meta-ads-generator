@@ -177,12 +177,22 @@ export default function Home() {
     }
     
     try {
+      // Limiter le nombre total d'images pour éviter erreur 413 (Payload Too Large)
+      const allImages = Object.values(productGroups).flat();
+      const maxImages = 10; // Limite à 10 images max
+      const limitedGroups = Object.fromEntries(
+        Object.entries(productGroups).map(([name, images]) => [
+          name,
+          images.slice(0, Math.ceil(maxImages / Object.keys(productGroups).length))
+        ])
+      );
+      
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           mode: 'single',
-          productGroups: productGroups,
+          productGroups: limitedGroups,
           brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type }))
         }),
       });
@@ -282,11 +292,13 @@ export default function Home() {
 
     Array.from(files).forEach(file => {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = event.target?.result as string;
+        // Compresser l'image avant de l'ajouter
+        const compressed = await compressImage(base64);
         setProductGroups(prev => ({
           ...prev,
-          [groupName]: [...(prev[groupName] || []), { name: file.name, url: base64 }]
+          [groupName]: [...(prev[groupName] || []), { name: file.name, url: compressed }]
         }));
         addLog(`✅ ${file.name} ajouté à "${groupName}"`);
       };
@@ -365,8 +377,8 @@ export default function Home() {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d')!;
         
-        // Réduire à 800x800 max pour économiser de l'espace
-        const maxSize = 800;
+        // Réduire à 600x600 max pour économiser de l'espace (au lieu de 800)
+        const maxSize = 600;
         let width = img.width;
         let height = img.height;
         
@@ -382,8 +394,8 @@ export default function Home() {
         canvas.height = height;
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Compression JPEG à 70% de qualité
-        const compressed = canvas.toDataURL('image/jpeg', 0.7);
+        // Compression JPEG à 50% de qualité (au lieu de 70%)
+        const compressed = canvas.toDataURL('image/jpeg', 0.5);
         resolve(compressed);
       };
       img.src = base64;
