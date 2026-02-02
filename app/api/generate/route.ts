@@ -132,7 +132,7 @@ VIDEO GENERATION RULES:
         console.log(`🔑 Utilisation clé API #${(currentKeyIndex % apiKeys.length) + 1}`);
         
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/veo-3-preview:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:generateContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: {
