@@ -124,6 +124,9 @@ VIDEO GENERATION RULES:
       videoInstructions += '\n- Incorporate the brand logo naturally and subtly in the composition';
     }
     
+    // TEST : Version simplifiée sans images pour debug
+    console.log('🧪 TEST: Génération Veo sans images de référence');
+    
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         console.log(`🔄 Tentative ${attempt}/${retries}...`);
@@ -141,10 +144,8 @@ VIDEO GENERATION RULES:
             body: JSON.stringify({
               contents: [{
                 parts: [
-                  ...imageParts,
-                  ...brandParts,
                   {
-                    text: videoInstructions
+                    text: `A beautiful product video. ${prompt}. Smooth camera movement. 8 seconds. High quality.`
                   }
                 ]
               }],
@@ -157,6 +158,12 @@ VIDEO GENERATION RULES:
             }),
           }
         );
+
+        console.log('📡 Status réponse:', response.status);
+        console.log('📡 Headers:', JSON.stringify(Object.fromEntries(response.headers)));
+        
+        const responseText = await response.text();
+        console.log('📡 Réponse brute (300 premiers chars):', responseText.substring(0, 300));
 
         if (response.status === 503) {
           console.log('⚠️ Serveur surchargé (503)...');
@@ -182,23 +189,39 @@ VIDEO GENERATION RULES:
         }
 
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Erreur API Veo:', errorText);
+          const errorText = responseText;
+          console.error('❌ Erreur API Veo:', errorText.substring(0, 500));
           throw new Error(`Erreur API Veo: ${response.status}`);
         }
 
-        const data = await response.json();
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (e) {
+          console.error('❌ Impossible de parser la réponse JSON');
+          throw new Error('Réponse invalide de Veo');
+        }
         console.log('📦 Réponse Veo reçue');
+        console.log('🔍 Structure réponse:', JSON.stringify(data).substring(0, 500));
         
         if (!data.candidates || data.candidates.length === 0) {
+          console.error('❌ Aucun candidat dans la réponse');
+          console.error('Réponse complète:', JSON.stringify(data));
           throw new Error('Aucune vidéo générée');
         }
         
         const candidate = data.candidates[0];
+        console.log('🔍 Candidate structure:', Object.keys(candidate));
+        
         const parts = candidate.content?.parts || [];
+        console.log('🔍 Nombre de parts:', parts.length);
+        console.log('🔍 Types de parts:', parts.map((p: any) => Object.keys(p)));
+        
         const videoPart = parts.find((part: any) => part.inlineData);
         
         if (!videoPart?.inlineData?.data) {
+          console.error('❌ Pas de inlineData trouvé');
+          console.error('Parts disponibles:', JSON.stringify(parts).substring(0, 500));
           throw new Error('Pas de données vidéo dans la réponse');
         }
         
@@ -496,19 +519,25 @@ export async function POST(request: Request) {
     }
     console.log(`📝 Texte sur ${contentType}: ${shouldIncludeText ? 'OUI' : 'NON'}`);
     
-    let mediaUrl: string;
+    let mediaUrl: string | null = null;
     let mediaType: string;
     
     if (contentType === 'video') {
-      mediaUrl = await generateVideoWithVeo3(
+      // Pour les vidéos, on marque "en cours vidéo" et le cron job s'en occupera
+      row.set('Statut', 'en cours vidéo');
+      row.set('Date génération', new Date().toLocaleString('fr-FR'));
+      await row.save();
+      
+      console.log('🎬 Vidéo mise en file d\'attente pour le cron job');
+      
+      return NextResponse.json({ 
+        success: true, 
+        imageUrl: null,
+        mediaType: 'video',
         prompt,
-        selectedImages,
-        brandAssets,
-        shouldIncludeLogo,
-        shouldIncludeText,
-        format
-      );
-      mediaType = 'video';
+        remaining: pendingRows.length - 1,
+        message: 'Vidéo en cours de génération (traitement dans 1-2 minutes)'
+      });
     } else {
       mediaUrl = await generateWithProductImage(
         prompt, 
