@@ -2,25 +2,39 @@ import { NextResponse } from 'next/server';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 
-async function getSheetData() {
-  try {
-    const serviceAccountAuth = new JWT({
-      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+async function getSheetData(retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const serviceAccountAuth = new JWT({
+        email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
 
-    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID!, serviceAccountAuth);
-    
-    await doc.loadInfo();
-    const sheet = doc.sheetsByIndex[0];
-    const rows = await sheet.getRows();
-    
-    return { sheet, rows };
-  } catch (error: any) {
-    console.error('Erreur Google Sheets:', error.message);
-    throw new Error(`Erreur d'accès au Google Sheet: ${error.message}`);
+      const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID!, serviceAccountAuth);
+      
+      await doc.loadInfo();
+      const sheet = doc.sheetsByIndex[0];
+      const rows = await sheet.getRows();
+      
+      return { sheet, rows };
+    } catch (error: any) {
+      console.error(`Erreur Google Sheets (tentative ${attempt}/${retries}):`, error.message);
+      
+      // Si c'est une erreur 503 et qu'il reste des tentatives, on attend et on réessaie
+      if (error.message.includes('503') && attempt < retries) {
+        const waitTime = attempt * 2000; // 2s, 4s, 6s
+        console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+      
+      // Sinon on lance l'erreur
+      throw new Error(`Erreur d'accès au Google Sheet: ${error.message}`);
+    }
   }
+  
+  throw new Error('Échec après plusieurs tentatives');
 }
 
 async function generateWithProductImage(
@@ -29,7 +43,7 @@ async function generateWithProductImage(
   brandAssetsData: { url: string; type: 'logo' | 'palette' | 'style' }[] = [],
   shouldIncludeLogo: boolean = false,
   format: string = '1:1', 
-  retries = 3
+  retries = 5
 ) {
   try {
     console.log('🎨 Génération avec Nano Banana Pro');
@@ -123,7 +137,7 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, tit
         if (response.status === 503) {
           console.log('⚠️ Serveur surchargé (503)...');
           if (attempt < retries) {
-            const waitTime = attempt * 2000;
+            const waitTime = attempt * 3000; // 3s, 6s, 9s, 12s, 15s
             console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
             continue;
