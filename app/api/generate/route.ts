@@ -42,6 +42,7 @@ async function generateWithProductImage(
   productImagesBase64: string[], 
   brandAssetsData: { url: string; type: 'logo' | 'palette' | 'style' }[] = [],
   shouldIncludeLogo: boolean = false,
+  shouldIncludeText: boolean = true,
   format: string = '1:1', 
   retries = 5
 ) {
@@ -52,6 +53,7 @@ async function generateWithProductImage(
     console.log('🖼️ Nombre d\'images produit:', productImagesBase64.length);
     console.log('🎨 Nombre d\'assets de marque:', brandAssetsData.length);
     console.log('🏷️ Inclusion logo:', shouldIncludeLogo);
+    console.log('📝 Inclusion texte:', shouldIncludeText);
     
     // Préparer toutes les images produits en base64
     const productParts = productImagesBase64.map(imgBase64 => {
@@ -78,6 +80,14 @@ async function generateWithProductImage(
         };
       });
 
+    // Construire les instructions de texte
+    let textInstructions = '';
+    if (shouldIncludeText) {
+      textInstructions = '\n\nTEXT OVERLAY:\n- Add compelling French marketing text overlay on the image\n- Include catchy headlines, product benefits, or promotional messages\n- Use modern, readable typography\n- Ensure text is clearly visible and well-positioned';
+    } else {
+      textInstructions = '\n\nNO TEXT RULE:\n- DO NOT add ANY text, words, letters, numbers, or characters on the image\n- Pure visual composition without any textual elements\n- Focus solely on product photography and visual storytelling';
+    }
+    
     // Construire les instructions de marque
     let brandInstructions = '';
     const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
@@ -117,6 +127,7 @@ CRITICAL PRODUCT RULES:
 - Keep the product EXACTLY as shown in the reference images unless the prompt explicitly requests "illustration style", "drawing", "schematic", "cartoon", or similar artistic interpretation
 - The product packaging, bottles, labels and logo must remain accurate and readable
 - Only the background, lighting, and scene composition should be creative - the product itself stays authentic
+${textInstructions}
 ${brandInstructions}
 
 Professional marketing photography. High quality. Eye-catching for social media. 
@@ -226,6 +237,15 @@ export async function POST(request: Request) {
     const prompt = row.get('Prompt');
     let format = (row.get('Format') || '1:1').trim();
     
+    // Lire les options depuis le Sheet
+    const avecTexte = (row.get('Avec Texte') || 'oui').trim().toLowerCase();
+    const avecLogo = (row.get('Avec Logo') || 'non').trim().toLowerCase();
+    
+    const shouldIncludeText = avecTexte === 'oui';
+    const shouldIncludeLogo = avecLogo === 'oui';
+    
+    console.log(`📝 Options: Texte=${shouldIncludeText}, Logo=${shouldIncludeLogo}`);
+    
     // Liste des formats valides
     const validFormats = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
     
@@ -245,24 +265,23 @@ export async function POST(request: Request) {
       });
     }
     
-    // Détecter si le prompt demande explicitement le logo
-    const promptLower = prompt.toLowerCase();
-    const logoKeywords = ['logo', 'marque', 'branding', 'brand', 'identité visuelle'];
-    const shouldIncludeLogo = logoKeywords.some(keyword => promptLower.includes(keyword));
-    
     console.log('🚀 Génération:', prompt);
     console.log('📐 Format demandé:', format);
     console.log('🖼️ Images produit disponibles:', defaultProductImages.length);
     if (brandAssets.length > 0) {
       console.log('🎨 Assets de marque disponibles:', brandAssets.length);
-      if (shouldIncludeLogo) {
-        console.log('🏷️ Logo inclus (détecté dans le prompt)');
-      } else {
-        console.log('🏷️ Logo exclu (pas demandé dans le prompt)');
-      }
+      console.log(`🏷️ Logo: ${shouldIncludeLogo ? 'OUI' : 'NON'}`);
     }
+    console.log(`📝 Texte sur image: ${shouldIncludeText ? 'OUI' : 'NON'}`);
     
-    const imageUrl = await generateWithProductImage(prompt, defaultProductImages, brandAssets, shouldIncludeLogo, format);
+    const imageUrl = await generateWithProductImage(
+      prompt, 
+      defaultProductImages, 
+      brandAssets, 
+      shouldIncludeLogo,
+      shouldIncludeText, 
+      format
+    );
     
     row.set('Statut', 'généré');
     row.set('URL Image', 'Téléchargée localement');
