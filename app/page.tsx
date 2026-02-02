@@ -11,8 +11,10 @@ export default function Home() {
   const [autoMode, setAutoMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [productImages, setProductImages] = useState<{ name: string; url: string }[]>([]);
+  const [productGroups, setProductGroups] = useState<{ [groupName: string]: { name: string; url: string }[] }>({});
   const [uploading, setUploading] = useState(false);
+  const [showNewGroupModal, setShowNewGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
   const [brandAssets, setBrandAssets] = useState<{ name: string; url: string; type: 'logo' | 'palette' | 'style' }[]>([]);
   const [uploadingBrand, setUploadingBrand] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number }[]>([]);
@@ -27,15 +29,16 @@ export default function Home() {
     loadStats();
     addLog('🚀 Application démarrée');
     
-    // Restaurer les images produits depuis localStorage
-    const savedProductImages = localStorage.getItem('productImages');
-    if (savedProductImages) {
+    // Restaurer les groupes de produits depuis localStorage
+    const savedProductGroups = localStorage.getItem('productGroups');
+    if (savedProductGroups) {
       try {
-        const parsed = JSON.parse(savedProductImages);
-        setProductImages(parsed);
-        addLog(`📦 ${parsed.length} image(s) produit restaurée(s)`);
+        const parsed = JSON.parse(savedProductGroups);
+        setProductGroups(parsed);
+        const totalImages = Object.values(parsed).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
+        addLog(`📦 ${Object.keys(parsed).length} groupe(s) restauré(s) (${totalImages} images)`);
       } catch (e) {
-        console.error('Erreur restauration images produits:', e);
+        console.error('Erreur restauration groupes produits:', e);
       }
     }
     
@@ -71,17 +74,17 @@ export default function Home() {
     }
   }, []);
 
-  // Sauvegarder les images produits dans localStorage à chaque modification
+  // Sauvegarder les groupes de produits dans localStorage à chaque modification
   useEffect(() => {
-    if (productImages.length > 0) {
+    if (Object.keys(productGroups).length > 0) {
       try {
-        localStorage.setItem('productImages', JSON.stringify(productImages));
+        localStorage.setItem('productGroups', JSON.stringify(productGroups));
       } catch (e) {
         console.error('Quota localStorage dépassé:', e);
-        addLog('⚠️ Limite localStorage atteinte pour les images produits');
+        addLog('⚠️ Limite localStorage atteinte pour les groupes produits');
       }
     }
-  }, [productImages]);
+  }, [productGroups]);
 
   // Sauvegarder les assets de marque dans localStorage
   useEffect(() => {
@@ -157,9 +160,10 @@ export default function Home() {
   async function generateSingle() {
     if (isGenerating) return;
     
-    // Vérifier qu'il y a au moins une image dans la bibliothèque
-    if (productImages.length === 0) {
-      setError('⚠️ Upload au moins une image produit dans la bibliothèque !');
+    // Vérifier qu'il y a au moins un groupe avec des images
+    const totalImages = Object.values(productGroups).reduce((sum, imgs) => sum + imgs.length, 0);
+    if (totalImages === 0) {
+      setError('⚠️ Upload au moins une image produit dans un groupe !');
       addLog('❌ Aucune image produit disponible');
       return;
     }
@@ -167,7 +171,7 @@ export default function Home() {
     setIsGenerating(true);
     setError(null);
     addLog('🎨 Démarrage génération...');
-    addLog(`🖼️ Utilisation de ${productImages.length} image(s) produit`);
+    addLog(`🖼️ ${Object.keys(productGroups).length} groupe(s), ${totalImages} image(s) disponible(s)`);
     if (brandAssets.length > 0) {
       addLog(`🎨 Utilisation de ${brandAssets.length} asset(s) de marque`);
     }
@@ -178,7 +182,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           mode: 'single',
-          defaultProductImages: productImages.map(img => img.url),
+          productGroups: productGroups,
           brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type }))
         }),
       });
@@ -248,19 +252,43 @@ export default function Home() {
     }
   }
 
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function createNewGroup() {
+    if (!newGroupName.trim()) {
+      alert('⚠️ Donne un nom au groupe !');
+      return;
+    }
+    
+    if (productGroups[newGroupName]) {
+      alert('⚠️ Ce nom de groupe existe déjà !');
+      return;
+    }
+    
+    setProductGroups(prev => ({
+      ...prev,
+      [newGroupName]: []
+    }));
+    
+    addLog(`📁 Groupe "${newGroupName}" créé`);
+    setNewGroupName('');
+    setShowNewGroupModal(false);
+  }
+
+  function handleGroupImageUpload(groupName: string, e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setUploading(true);
-    addLog(`📤 Upload de ${files.length} image(s)...`);
+    addLog(`📤 Upload de ${files.length} image(s) dans "${groupName}"...`);
 
     Array.from(files).forEach(file => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const base64 = event.target?.result as string;
-        setProductImages(prev => [...prev, { name: file.name, url: base64 }]);
-        addLog(`✅ ${file.name} uploadée`);
+        setProductGroups(prev => ({
+          ...prev,
+          [groupName]: [...(prev[groupName] || []), { name: file.name, url: base64 }]
+        }));
+        addLog(`✅ ${file.name} ajouté à "${groupName}"`);
       };
       reader.readAsDataURL(file);
     });
@@ -268,14 +296,31 @@ export default function Home() {
     setUploading(false);
   }
 
-  function copyImageUrl(url: string, name: string) {
-    navigator.clipboard.writeText(url);
-    addLog(`📋 URL copiée: ${name}`);
+  function deleteGroupImage(groupName: string, imageName: string) {
+    setProductGroups(prev => ({
+      ...prev,
+      [groupName]: prev[groupName].filter(img => img.name !== imageName)
+    }));
+    addLog(`🗑️ ${imageName} supprimé de "${groupName}"`);
   }
 
-  function deleteImage(name: string) {
-    setProductImages(prev => prev.filter(img => img.name !== name));
-    addLog(`🗑️ ${name} supprimée`);
+  function deleteGroup(groupName: string) {
+    if (confirm(`⚠️ Supprimer le groupe "${groupName}" et toutes ses images ?`)) {
+      setProductGroups(prev => {
+        const newGroups = { ...prev };
+        delete newGroups[groupName];
+        return newGroups;
+      });
+      addLog(`🗑️ Groupe "${groupName}" supprimé`);
+    }
+  }
+
+  function clearAllProductGroups() {
+    if (confirm('⚠️ Supprimer tous les groupes de produits et leurs images ?')) {
+      setProductGroups({});
+      localStorage.removeItem('productGroups');
+      addLog('🗑️ Tous les groupes effacés');
+    }
   }
 
   function handleBrandAssetUpload(e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'palette' | 'style') {
@@ -366,14 +411,14 @@ export default function Home() {
   }
 
   function clearAllData() {
-    if (confirm('⚠️ Supprimer toutes les images produits, assets de marque et la galerie ? Cette action est irréversible.')) {
-      setProductImages([]);
+    if (confirm('⚠️ Supprimer tous les groupes produits, assets de marque et la galerie ? Cette action est irréversible.')) {
+      setProductGroups({});
       setBrandAssets([]);
       setGeneratedImages([]);
       setCurrentImage(null);
       setCurrentPrompt('');
       setBatchCount(1);
-      localStorage.removeItem('productImages');
+      localStorage.removeItem('productGroups');
       localStorage.removeItem('brandAssets');
       localStorage.removeItem('generatedImages');
       localStorage.removeItem('batchCount');
@@ -382,11 +427,7 @@ export default function Home() {
   }
 
   function clearProductImages() {
-    if (confirm('⚠️ Supprimer toutes les images produits de la bibliothèque ? La galerie sera conservée.')) {
-      setProductImages([]);
-      localStorage.removeItem('productImages');
-      addLog('🗑️ Bibliothèque produits effacée');
-    }
+    clearAllProductGroups();
   }
 
   function clearGeneratedImages() {
@@ -491,60 +532,122 @@ export default function Home() {
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-2xl font-bold">📸 Bibliothèque Produits</h2>
-            {productImages.length > 0 && (
+            <div className="flex gap-2">
               <button
-                onClick={clearProductImages}
-                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold transition-all"
+                onClick={() => setShowNewGroupModal(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-semibold transition-all"
               >
-                🗑️ Vider bibliothèque
+                + Créer un groupe
               </button>
-            )}
-          </div>
-          
-          <label className="block w-full">
-            <div className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-              uploading ? 'border-gray-300 bg-gray-50' : 'border-purple-300 hover:border-purple-500 hover:bg-purple-50'
-            }`}>
-              <input
-                type="file"
-                multiple
-                accept="image/*"
-                onChange={handleImageUpload}
-                disabled={uploading}
-                className="hidden"
-              />
-              <div className="text-5xl mb-3">📤</div>
-              <p className="text-gray-700 font-semibold text-lg">
-                {uploading ? 'Upload en cours...' : 'Dépose tes images produits ici'}
-              </p>
-              <p className="text-sm text-gray-500 mt-2">PNG, JPG, WEBP acceptés</p>
+              {Object.keys(productGroups).length > 0 && (
+                <button
+                  onClick={clearAllProductGroups}
+                  className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold transition-all"
+                >
+                  🗑️ Tout effacer
+                </button>
+              )}
             </div>
-          </label>
+          </div>
 
-          {productImages.length > 0 && (
-            <div className="grid grid-cols-4 gap-4 mt-6">
-              {productImages.map((img, i) => (
-                <div key={i} className="relative group">
-                  <img 
-                    src={img.url} 
-                    alt={img.name}
-                    className="w-full h-32 object-cover rounded-lg shadow-md"
-                  />
-                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all rounded-lg flex items-center justify-center gap-2">
-                    <button
-                      onClick={() => copyImageUrl(img.url, img.name)}
-                      className="opacity-0 group-hover:opacity-100 bg-blue-600 text-white px-3 py-1 rounded text-sm font-semibold"
-                    >
-                      📋
-                    </button>
-                    <button
-                      onClick={() => deleteImage(img.name)}
-                      className="opacity-0 group-hover:opacity-100 bg-red-600 text-white px-3 py-1 rounded text-sm font-semibold"
-                    >
-                      🗑️
-                    </button>
+          {/* Modal création groupe */}
+          {showNewGroupModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
+                <h3 className="text-xl font-bold mb-4">Créer un groupe de produit</h3>
+                <input
+                  type="text"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Ex: Brumes Pikoc, Bougies, etc."
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-500 focus:outline-none"
+                  onKeyPress={(e) => e.key === 'Enter' && createNewGroup()}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={createNewGroup}
+                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold"
+                  >
+                    Créer
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowNewGroupModal(false);
+                      setNewGroupName('');
+                    }}
+                    className="flex-1 px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-semibold"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {Object.keys(productGroups).length === 0 ? (
+            <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
+              <div className="text-6xl mb-4">📂</div>
+              <p className="text-gray-600 font-semibold mb-2">Aucun groupe de produit</p>
+              <p className="text-sm text-gray-500">Crée un groupe pour commencer à uploader des images</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {Object.entries(productGroups).map(([groupName, images]) => (
+                <div key={groupName} className="border-2 border-gray-200 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      📂 {groupName}
+                      <span className="text-sm text-gray-500 font-normal">({images.length} image{images.length > 1 ? 's' : ''})</span>
+                    </h3>
+                    <div className="flex gap-2">
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          onChange={(e) => handleGroupImageUpload(groupName, e)}
+                          disabled={uploading}
+                          className="hidden"
+                        />
+                        <span className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-semibold transition-all inline-block">
+                          + Ajouter images
+                        </span>
+                      </label>
+                      <button
+                        onClick={() => deleteGroup(groupName)}
+                        className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold transition-all"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-600 mt-1 truncate">{img.name}</p>
+
+                  {images.length === 0 ? (
+                    <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                      <p className="text-gray-500 text-sm">Aucune image dans ce groupe</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-3">
+                      {images.map((img, i) => (
+                        <div key={i} className="relative group">
+                          <img 
+                            src={img.url} 
+                            alt={img.name}
+                            className="w-full h-24 object-cover rounded-lg shadow-md"
+                          />
+                          <button
+                            onClick={() => deleteGroupImage(groupName, img.name)}
+                            className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 transition-all rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100"
+                          >
+                            <span className="bg-red-600 text-white px-3 py-1 rounded text-sm font-semibold">
+                              🗑️
+                            </span>
+                          </button>
+                          <p className="text-xs text-gray-600 mt-1 truncate">{img.name}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

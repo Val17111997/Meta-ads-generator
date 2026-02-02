@@ -201,7 +201,7 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, tit
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { defaultProductImages, brandAssets = [] } = body;
+    const { productGroups = {}, brandAssets = [] } = body;
     
     if (!process.env.GOOGLE_API_KEY) {
       return NextResponse.json({ 
@@ -210,10 +210,12 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
 
-    if (!defaultProductImages || defaultProductImages.length === 0) {
+    // Vérifier qu'il y a au moins un groupe avec des images
+    const totalImages = Object.values(productGroups).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
+    if (totalImages === 0) {
       return NextResponse.json({ 
         success: false,
-        error: 'Aucune image produit. Upload au moins une image dans la bibliothèque !' 
+        error: 'Aucune image produit. Crée un groupe et upload des images !' 
       }, { status: 400 });
     }
     
@@ -236,6 +238,7 @@ export async function POST(request: Request) {
     const row = pendingRows[0];
     const prompt = row.get('Prompt');
     let format = (row.get('Format') || '1:1').trim();
+    const productName = (row.get('Produit') || '').trim();
     
     // Lire les options depuis le Sheet
     const avecTexte = (row.get('Avec Texte') || 'oui').trim().toLowerCase();
@@ -245,6 +248,34 @@ export async function POST(request: Request) {
     const shouldIncludeLogo = avecLogo === 'oui';
     
     console.log(`📝 Options: Texte=${shouldIncludeText}, Logo=${shouldIncludeLogo}`);
+    
+    // Sélectionner les images du groupe demandé
+    let selectedImages: string[] = [];
+    
+    if (productName && productGroups[productName]) {
+      // Groupe spécifique demandé
+      selectedImages = productGroups[productName].map((img: any) => img.url);
+      console.log(`📂 Groupe sélectionné: "${productName}" (${selectedImages.length} images)`);
+    } else if (productName && !productGroups[productName]) {
+      // Groupe demandé mais n'existe pas
+      return NextResponse.json({ 
+        success: false,
+        message: `Groupe "${productName}" introuvable. Groupes disponibles: ${Object.keys(productGroups).join(', ')}` 
+      });
+    } else {
+      // Pas de groupe spécifié → prendre toutes les images
+      selectedImages = Object.values(productGroups)
+        .flat()
+        .map((img: any) => img.url);
+      console.log(`📂 Aucun groupe spécifié, utilisation de toutes les images (${selectedImages.length})`);
+    }
+    
+    if (selectedImages.length === 0) {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Aucune image disponible pour ce produit' 
+      });
+    }
     
     // Liste des formats valides
     const validFormats = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
@@ -267,7 +298,7 @@ export async function POST(request: Request) {
     
     console.log('🚀 Génération:', prompt);
     console.log('📐 Format demandé:', format);
-    console.log('🖼️ Images produit disponibles:', defaultProductImages.length);
+    console.log('🖼️ Images sélectionnées:', selectedImages.length);
     if (brandAssets.length > 0) {
       console.log('🎨 Assets de marque disponibles:', brandAssets.length);
       console.log(`🏷️ Logo: ${shouldIncludeLogo ? 'OUI' : 'NON'}`);
@@ -276,7 +307,7 @@ export async function POST(request: Request) {
     
     const imageUrl = await generateWithProductImage(
       prompt, 
-      defaultProductImages, 
+      selectedImages, 
       brandAssets, 
       shouldIncludeLogo,
       shouldIncludeText, 
