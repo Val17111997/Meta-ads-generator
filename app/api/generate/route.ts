@@ -55,6 +55,10 @@ async function generateWithProductImage(
     console.log('🏷️ Inclusion logo:', shouldIncludeLogo);
     console.log('📝 Inclusion texte:', shouldIncludeText);
     
+    // Rotation de clés API - ajouter plusieurs clés séparées par des virgules
+    const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
+    let currentKeyIndex = 0;
+    
     // Préparer toutes les images produits en base64
     const productParts = productImagesBase64.map(imgBase64 => {
       const base64Data = imgBase64.split(',')[1] || imgBase64;
@@ -106,8 +110,12 @@ async function generateWithProductImage(
       try {
         console.log(`🔄 Tentative ${attempt}/${retries}...`);
         
+        // Utiliser une clé API différente à chaque tentative
+        const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
+        console.log(`🔑 Utilisation clé API #${(currentKeyIndex % apiKeys.length) + 1}`);
+        
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${apiKey}`,
           {
             method: 'POST',
             headers: {
@@ -154,6 +162,18 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, tit
             continue;
           }
           throw new Error('Serveurs Google surchargés. Réessaye dans quelques minutes.');
+        }
+
+        if (response.status === 429) {
+          console.log('⚠️ Limite de débit atteinte (429)...');
+          currentKeyIndex++; // Passer à la clé suivante
+          if (attempt < retries) {
+            const waitTime = apiKeys.length > 1 ? 2000 : 10000 + (attempt * 5000);
+            console.log(`⏳ Attente ${waitTime/1000}s avant retry avec ${apiKeys.length > 1 ? 'clé suivante' : 'même clé'}...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue;
+          }
+          throw new Error('Limite de requêtes atteinte. Attends quelques minutes avant de réessayer.');
         }
 
         if (!response.ok) {

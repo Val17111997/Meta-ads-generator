@@ -136,7 +136,7 @@ export default function Home() {
     if (autoMode && stats.remaining > 0) {
       const generateLoop = async () => {
         await generateSingle();
-        intervalId = setTimeout(generateLoop, 3000);
+        intervalId = setTimeout(generateLoop, 5000); // 5 secondes au lieu de 3
       };
       generateLoop();
     }
