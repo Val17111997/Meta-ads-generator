@@ -17,7 +17,7 @@ export default function Home() {
   const [newGroupName, setNewGroupName] = useState('');
   const [brandAssets, setBrandAssets] = useState<{ name: string; url: string; type: 'logo' | 'palette' | 'style' }[]>([]);
   const [uploadingBrand, setUploadingBrand] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number }[]>([]);
+  const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
 
   const addLog = (message: string) => {
@@ -207,7 +207,8 @@ export default function Home() {
         const newImage = {
           url: data.imageUrl,
           prompt: data.prompt,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          mediaType: data.mediaType || 'image'
         };
         setCurrentImage(data.imageUrl);
         setCurrentPrompt(data.prompt);
@@ -402,14 +403,15 @@ export default function Home() {
     });
   }
 
-  function downloadSingleImage(imageUrl: string, prompt: string, timestamp: number) {
+  function downloadSingleImage(mediaUrl: string, prompt: string, timestamp: number) {
     const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = `meta-ad-${timestamp}.png`;
+    link.href = mediaUrl;
+    const extension = mediaUrl.startsWith('data:video') ? 'mp4' : 'png';
+    link.download = `meta-ad-${timestamp}.${extension}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    addLog(`📥 Image téléchargée`);
+    addLog(`📥 ${extension.toUpperCase()} téléchargé`);
   }
 
   function downloadAllImages() {
@@ -458,15 +460,19 @@ export default function Home() {
       
       const zip = new JSZip();
       
-      // Ajouter chaque image au ZIP (sans le fichier texte)
+      // Ajouter chaque média au ZIP (images et vidéos)
       for (let i = 0; i < images.length; i++) {
-        const img = images[i];
+        const media = images[i];
         
         // Extraire les données base64
-        const base64Data = img.url.split(',')[1];
+        const base64Data = media.url.split(',')[1];
         
-        // Ajouter uniquement l'image au ZIP
-        zip.file(`image-${i + 1}.png`, base64Data, { base64: true });
+        // Déterminer l'extension
+        const isVideo = media.mediaType === 'video' || media.url.startsWith('data:video');
+        const extension = isVideo ? 'mp4' : 'png';
+        
+        // Ajouter le fichier au ZIP
+        zip.file(`${isVideo ? 'video' : 'image'}-${i + 1}.${extension}`, base64Data, { base64: true });
       }
       
       // Générer le ZIP
@@ -480,7 +486,7 @@ export default function Home() {
       link.click();
       document.body.removeChild(link);
       
-      addLog(`✅ ZIP batch-${batchNumber} téléchargé (${images.length} images)`);
+      addLog(`✅ ZIP batch-${batchNumber} téléchargé (${images.length} médias)`);
       
       return true;
     } catch (error) {
@@ -810,11 +816,21 @@ export default function Home() {
             {currentImage ? (
               <div>
                 <div className="relative aspect-square rounded-xl overflow-hidden shadow-lg mb-4 border-4 border-gray-100">
-                  <img 
-                    src={currentImage} 
-                    alt="Generated" 
-                    className="w-full h-full object-cover"
-                  />
+                  {currentImage.startsWith('data:video') ? (
+                    <video 
+                      src={currentImage} 
+                      controls
+                      autoPlay
+                      loop
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <img 
+                      src={currentImage} 
+                      alt="Generated" 
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                 </div>
                 {currentPrompt && (
                   <div className="bg-gray-50 p-4 rounded-lg mb-4">
@@ -824,7 +840,7 @@ export default function Home() {
                 )}
                 <a
                   href={currentImage}
-                  download={`meta-ad-${Date.now()}.png`}
+                  download={`meta-ad-${Date.now()}.${currentImage.startsWith('data:video') ? 'mp4' : 'png'}`}
                   className="block w-full py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white text-center rounded-lg font-bold transition-all"
                 >
                   📥 Télécharger
@@ -890,11 +906,31 @@ export default function Home() {
               {generatedImages.map((img, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3 hover:shadow-lg transition-all">
                   <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border-2 border-gray-200">
-                    <img 
-                      src={img.url} 
-                      alt={img.prompt}
-                      className="w-full h-full object-cover"
-                    />
+                    {img.mediaType === 'video' || img.url.startsWith('data:video') ? (
+                      <>
+                        <video 
+                          src={img.url} 
+                          loop
+                          muted
+                          className="w-full h-full object-cover"
+                          onMouseEnter={(e) => (e.target as HTMLVideoElement).play()}
+                          onMouseLeave={(e) => {
+                            const video = e.target as HTMLVideoElement;
+                            video.pause();
+                            video.currentTime = 0;
+                          }}
+                        />
+                        <div className="absolute top-2 right-2 bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">
+                          🎬 VIDEO
+                        </div>
+                      </>
+                    ) : (
+                      <img 
+                        src={img.url} 
+                        alt={img.prompt}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
                   </div>
                   <p className="text-xs text-gray-600 mb-2 line-clamp-2">
                     {img.prompt}

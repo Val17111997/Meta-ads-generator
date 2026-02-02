@@ -21,20 +21,188 @@ async function getSheetData(retries = 3) {
     } catch (error: any) {
       console.error(`Erreur Google Sheets (tentative ${attempt}/${retries}):`, error.message);
       
-      // Si c'est une erreur 503 et qu'il reste des tentatives, on attend et on réessaie
       if (error.message.includes('503') && attempt < retries) {
-        const waitTime = attempt * 2000; // 2s, 4s, 6s
+        const waitTime = attempt * 2000;
         console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
       
-      // Sinon on lance l'erreur
       throw new Error(`Erreur d'accès au Google Sheet: ${error.message}`);
     }
   }
   
   throw new Error('Échec après plusieurs tentatives');
+}
+
+async function generateVideoWithVeo3(
+  prompt: string,
+  productImagesBase64: string[],
+  brandAssetsData: { url: string; type: 'logo' | 'palette' | 'style' }[] = [],
+  shouldIncludeLogo: boolean = false,
+  shouldIncludeText: boolean = true,
+  format: string = '9:16',
+  retries = 5
+) {
+  try {
+    console.log('🎬 Génération vidéo avec Veo 3.1 (multi-image reference)');
+    console.log('📸 Prompt:', prompt);
+    console.log('📐 Format:', format);
+    console.log('🖼️ Nombre d\'images produit disponibles:', productImagesBase64.length);
+    
+    const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
+    let currentKeyIndex = 0;
+    
+    const maxReferenceImages = 3;
+    const productReferences = productImagesBase64.slice(0, maxReferenceImages);
+    console.log(`🖼️ Utilisation de ${productReferences.length} image(s) produit comme référence(s)`);
+    
+    const imageParts = productReferences.map(imgBase64 => {
+      const base64Data = imgBase64.split(',')[1] || imgBase64;
+      return {
+        inlineData: {
+          mimeType: 'image/png',
+          data: base64Data
+        }
+      };
+    });
+    
+    const remainingSlots = maxReferenceImages - productReferences.length;
+    const brandParts = brandAssetsData
+      .filter(asset => shouldIncludeLogo ? true : asset.type !== 'logo')
+      .slice(0, remainingSlots)
+      .map(asset => {
+        const base64Data = asset.url.split(',')[1] || asset.url;
+        return {
+          inlineData: {
+            mimeType: 'image/png',
+            data: base64Data
+          }
+        };
+      });
+    
+    if (brandParts.length > 0) {
+      console.log(`🎨 Ajout de ${brandParts.length} asset(s) de marque comme référence(s)`);
+    }
+    
+    let videoInstructions = `Create a professional Meta ad video featuring the product(s) shown in the reference images. ${prompt}.
+
+VIDEO GENERATION RULES:
+- Use the ${productReferences.length} product image(s) provided as visual references
+- Smooth, cinematic camera movements (zoom, pan, dolly, rotate)
+- Keep all products clearly visible and recognizable throughout the video
+- Professional lighting and composition
+- Eye-catching motion perfect for social media advertising
+- 8 seconds duration
+- High quality, polished result`;
+
+    if (shouldIncludeText) {
+      videoInstructions += '\n- Add compelling French marketing text overlay that remains readable throughout';
+    } else {
+      videoInstructions += '\n- NO text or words on the video - pure visual storytelling only';
+    }
+    
+    if (shouldIncludeLogo && brandParts.length > 0) {
+      videoInstructions += '\n- Incorporate the brand logo naturally and subtly in the composition';
+    }
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.log(`🔄 Tentative ${attempt}/${retries}...`);
+        
+        const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
+        console.log(`🔑 Utilisation clé API #${(currentKeyIndex % apiKeys.length) + 1}`);
+        
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/veo-3-preview:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  ...imageParts,
+                  ...brandParts,
+                  {
+                    text: videoInstructions
+                  }
+                ]
+              }],
+              generationConfig: {
+                videoConfig: {
+                  aspectRatio: format,
+                  duration: '8s'
+                }
+              }
+            }),
+          }
+        );
+
+        if (response.status === 503) {
+          console.log('⚠️ Serveur surchargé (503)...');
+          if (attempt < retries) {
+            const waitTime = attempt * 3000;
+            console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue;
+          }
+          throw new Error('Serveurs Google surchargés. Réessaye dans quelques minutes.');
+        }
+
+        if (response.status === 429) {
+          console.log('⚠️ Limite de débit atteinte (429)...');
+          currentKeyIndex++;
+          if (attempt < retries) {
+            const waitTime = apiKeys.length > 1 ? 2000 : 10000 + (attempt * 5000);
+            console.log(`⏳ Attente ${waitTime/1000}s avant retry avec ${apiKeys.length > 1 ? 'clé suivante' : 'même clé'}...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue;
+          }
+          throw new Error('Limite de requêtes atteinte. Attends quelques minutes avant de réessayer.');
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Erreur API Veo:', errorText);
+          throw new Error(`Erreur API Veo: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('📦 Réponse Veo reçue');
+        
+        if (!data.candidates || data.candidates.length === 0) {
+          throw new Error('Aucune vidéo générée');
+        }
+        
+        const candidate = data.candidates[0];
+        const parts = candidate.content?.parts || [];
+        const videoPart = parts.find((part: any) => part.inlineData);
+        
+        if (!videoPart?.inlineData?.data) {
+          throw new Error('Pas de données vidéo dans la réponse');
+        }
+        
+        const videoUrl = `data:video/mp4;base64,${videoPart.inlineData.data}`;
+        console.log('✅ Vidéo générée avec succès avec multi-image reference');
+        
+        return videoUrl;
+        
+      } catch (error: any) {
+        if (attempt === retries) {
+          throw error;
+        }
+        console.log(`❌ Tentative ${attempt} échouée, retry...`);
+      }
+    }
+    
+    throw new Error('Échec après plusieurs tentatives');
+    
+  } catch (error: any) {
+    console.error('❌ Erreur:', error.message);
+    throw error;
+  }
 }
 
 async function generateWithProductImage(
@@ -55,11 +223,9 @@ async function generateWithProductImage(
     console.log('🏷️ Inclusion logo:', shouldIncludeLogo);
     console.log('📝 Inclusion texte:', shouldIncludeText);
     
-    // Rotation de clés API - ajouter plusieurs clés séparées par des virgules
     const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
     let currentKeyIndex = 0;
     
-    // Préparer toutes les images produits en base64
     const productParts = productImagesBase64.map(imgBase64 => {
       const base64Data = imgBase64.split(',')[1] || imgBase64;
       return {
@@ -70,8 +236,6 @@ async function generateWithProductImage(
       };
     });
 
-    // Préparer les assets de marque
-    // Inclure le logo UNIQUEMENT si shouldIncludeLogo est true
     const brandParts = brandAssetsData
       .filter(asset => shouldIncludeLogo ? true : asset.type !== 'logo')
       .map(asset => {
@@ -84,7 +248,6 @@ async function generateWithProductImage(
         };
       });
 
-    // Construire les instructions de texte
     let textInstructions = '';
     if (shouldIncludeText) {
       textInstructions = '\n\nTEXT OVERLAY:\n- Add compelling French marketing text overlay on the image\n- Include catchy headlines, product benefits, or promotional messages\n- Use modern, readable typography\n- Ensure text is clearly visible and well-positioned';
@@ -92,7 +255,6 @@ async function generateWithProductImage(
       textInstructions = '\n\nNO TEXT RULE:\n- DO NOT add ANY text, words, letters, numbers, or characters on the image\n- Pure visual composition without any textual elements\n- Focus solely on product photography and visual storytelling';
     }
     
-    // Construire les instructions de marque
     let brandInstructions = '';
     const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
     const hasPalette = brandAssetsData.some(a => a.type === 'palette');
@@ -110,7 +272,6 @@ async function generateWithProductImage(
       try {
         console.log(`🔄 Tentative ${attempt}/${retries}...`);
         
-        // Utiliser une clé API différente à chaque tentative
         const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
         console.log(`🔑 Utilisation clé API #${(currentKeyIndex % apiKeys.length) + 1}`);
         
@@ -156,7 +317,7 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, tit
         if (response.status === 503) {
           console.log('⚠️ Serveur surchargé (503)...');
           if (attempt < retries) {
-            const waitTime = attempt * 3000; // 3s, 6s, 9s, 12s, 15s
+            const waitTime = attempt * 3000;
             console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
             continue;
@@ -166,7 +327,7 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, tit
 
         if (response.status === 429) {
           console.log('⚠️ Limite de débit atteinte (429)...');
-          currentKeyIndex++; // Passer à la clé suivante
+          currentKeyIndex++;
           if (attempt < retries) {
             const waitTime = apiKeys.length > 1 ? 2000 : 10000 + (attempt * 5000);
             console.log(`⏳ Attente ${waitTime/1000}s avant retry avec ${apiKeys.length > 1 ? 'clé suivante' : 'même clé'}...`);
@@ -230,7 +391,6 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
 
-    // Vérifier qu'il y a au moins un groupe avec des images
     const totalImages = Object.values(productGroups).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
     if (totalImages === 0) {
       return NextResponse.json({ 
@@ -259,31 +419,27 @@ export async function POST(request: Request) {
     const prompt = row.get('Prompt');
     let format = (row.get('Format') || '1:1').trim();
     const productName = (row.get('Produit') || '').trim();
+    const contentType = (row.get('Type') || 'photo').trim().toLowerCase();
     
-    // Lire les options depuis le Sheet
     const avecTexte = (row.get('Avec Texte') || 'oui').trim().toLowerCase();
     const avecLogo = (row.get('Avec Logo') || 'non').trim().toLowerCase();
     
     const shouldIncludeText = avecTexte === 'oui';
     const shouldIncludeLogo = avecLogo === 'oui';
     
-    console.log(`📝 Options: Texte=${shouldIncludeText}, Logo=${shouldIncludeLogo}`);
+    console.log(`📝 Options: Type=${contentType}, Texte=${shouldIncludeText}, Logo=${shouldIncludeLogo}`);
     
-    // Sélectionner les images du groupe demandé
     let selectedImages: string[] = [];
     
     if (productName && productGroups[productName]) {
-      // Groupe spécifique demandé
       selectedImages = productGroups[productName].map((img: any) => img.url);
       console.log(`📂 Groupe sélectionné: "${productName}" (${selectedImages.length} images)`);
     } else if (productName && !productGroups[productName]) {
-      // Groupe demandé mais n'existe pas
       return NextResponse.json({ 
         success: false,
         message: `Groupe "${productName}" introuvable. Groupes disponibles: ${Object.keys(productGroups).join(', ')}` 
       });
     } else {
-      // Pas de groupe spécifié → prendre toutes les images
       selectedImages = Object.values(productGroups)
         .flat()
         .map((img: any) => img.url);
@@ -297,13 +453,9 @@ export async function POST(request: Request) {
       });
     }
     
-    // Liste des formats valides
     const validFormats = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
-    
-    // Nettoyer le format (enlever les zéros devant)
     format = format.replace(/^0+(\d)/, '$1');
     
-    // Valider le format
     if (!validFormats.includes(format)) {
       console.log(`⚠️ Format invalide "${format}", utilisation de 1:1 par défaut`);
       format = '1:1';
@@ -318,21 +470,38 @@ export async function POST(request: Request) {
     
     console.log('🚀 Génération:', prompt);
     console.log('📐 Format demandé:', format);
+    console.log('🎬 Type de contenu:', contentType);
     console.log('🖼️ Images sélectionnées:', selectedImages.length);
     if (brandAssets.length > 0) {
       console.log('🎨 Assets de marque disponibles:', brandAssets.length);
       console.log(`🏷️ Logo: ${shouldIncludeLogo ? 'OUI' : 'NON'}`);
     }
-    console.log(`📝 Texte sur image: ${shouldIncludeText ? 'OUI' : 'NON'}`);
+    console.log(`📝 Texte sur ${contentType}: ${shouldIncludeText ? 'OUI' : 'NON'}`);
     
-    const imageUrl = await generateWithProductImage(
-      prompt, 
-      selectedImages, 
-      brandAssets, 
-      shouldIncludeLogo,
-      shouldIncludeText, 
-      format
-    );
+    let mediaUrl: string;
+    let mediaType: string;
+    
+    if (contentType === 'video') {
+      mediaUrl = await generateVideoWithVeo3(
+        prompt,
+        selectedImages,
+        brandAssets,
+        shouldIncludeLogo,
+        shouldIncludeText,
+        format
+      );
+      mediaType = 'video';
+    } else {
+      mediaUrl = await generateWithProductImage(
+        prompt, 
+        selectedImages, 
+        brandAssets, 
+        shouldIncludeLogo,
+        shouldIncludeText, 
+        format
+      );
+      mediaType = 'image';
+    }
     
     row.set('Statut', 'généré');
     row.set('URL Image', 'Téléchargée localement');
@@ -343,7 +512,8 @@ export async function POST(request: Request) {
     
     return NextResponse.json({ 
       success: true, 
-      imageUrl,
+      imageUrl: mediaUrl,
+      mediaType: mediaType,
       prompt,
       remaining: pendingRows.length - 1,
     });
