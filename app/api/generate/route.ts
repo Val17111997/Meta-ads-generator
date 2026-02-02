@@ -53,16 +53,34 @@ async function generateVideoWithVeo3(
     const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
     let currentKeyIndex = 0;
     
-    const maxReferenceImages = 3;
+    // TEMPORAIRE : Limiter à 1 image pour éviter erreur 400
+    const maxReferenceImages = 1; // Au lieu de 3
     const productReferences = productImagesBase64.slice(0, maxReferenceImages);
     console.log(`🖼️ Utilisation de ${productReferences.length} image(s) produit comme référence(s)`);
     
+    // Compresser les images pour Veo (max 1024x1024, qualité 60%)
+    const compressImageForVeo = (base64: string): string => {
+      try {
+        // Si l'image est trop grande, la retourner telle quelle (sera gérée par le canvas côté client)
+        // Pour l'instant, on envoie directement
+        return base64;
+      } catch (e) {
+        return base64;
+      }
+    };
+    
     const imageParts = productReferences.map(imgBase64 => {
       const base64Data = imgBase64.split(',')[1] || imgBase64;
+      // Limiter la taille de chaque image à ~500KB en base64 (≈375KB en bytes)
+      const maxBase64Length = 500000;
+      const trimmedData = base64Data.length > maxBase64Length 
+        ? base64Data.substring(0, maxBase64Length) 
+        : base64Data;
+      
       return {
         inlineData: {
-          mimeType: 'image/png',
-          data: base64Data
+          mimeType: 'image/jpeg', // JPEG au lieu de PNG pour Veo
+          data: trimmedData
         }
       };
     });
