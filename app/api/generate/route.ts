@@ -117,45 +117,8 @@ async function generateVideoWithVeo(
         throw new Error('Pas de operation name retourné par Veo');
       }
 
-      // --- Étape 2 : Polling jusqu'à done=true (max ~50s) ---
-      const maxPolls = 5; // 5 × 10s = 50s max (reste 10s de marge sur maxDuration=60)
-      for (let poll = 1; poll <= maxPolls; poll++) {
-        await new Promise(r => setTimeout(r, 10000));
-        console.log(`⏳ Polling ${poll}/${maxPolls}...`);
-
-        const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operation.name}?key=${apiKey}`;
-        const checkResponse = await fetch(checkUrl);
-
-        if (!checkResponse.ok) {
-          console.error('❌ Erreur polling:', await checkResponse.text());
-          continue;
-        }
-
-        const checkText = await checkResponse.text();
-        let updatedOp: any;
-        try {
-          updatedOp = JSON.parse(checkText);
-        } catch {
-          console.error('❌ Polling réponse non-JSON:', checkText.substring(0, 300));
-          continue;
-        }
-        console.log('📊 done:', updatedOp.done);
-
-        if (updatedOp.done) {
-          // Extraire l'URI vidéo
-          const videoUri = updatedOp.response?.videos?.[0]?.uri;
-          if (videoUri) {
-            console.log('✅ Vidéo générée !');
-            return videoUri;
-          }
-          console.error('❌ done=true mais pas de vidéo. Réponse:', JSON.stringify(updatedOp));
-          throw new Error('Vidéo générée mais URI absente');
-        }
-      }
-
-      // Timeout polling
-      console.log('⏰ Timeout polling après 50s');
-      throw new Error('Timeout: vidéo pas prête après 50s');
+      console.log('✅ Opération Veo démarrée');
+      return operation.name;
 
     } catch (error: any) {
       console.error(`❌ Tentative ${attempt} échouée:`, error.message);
@@ -440,32 +403,44 @@ export async function POST(request: Request) {
     console.log('📐 Format demandé:', format);
     console.log('🎬 Type de contenu:', contentType);
     
-    let mediaUrl: string | null = null;
-    let mediaType: string;
-    
     // ============================================================
-    // VIDEO : appel direct à Veo predictLongRunning (comme les images)
+    // VIDEO : lance l'opération Veo et retourne immédiatement
+    // Le frontend fera le polling via /api/veo-poll
     // ============================================================
     if (contentType === 'video') {
-      console.log('🎬 Génération vidéo directe avec Veo...');
-      mediaUrl = await generateVideoWithVeo(prompt, format);
-      mediaType = 'video';
-    } else {
-      // IMAGE : appel direct à Gemini (comme avant)
-      mediaUrl = await generateWithProductImage(
-        prompt, 
-        selectedImages, 
-        brandAssets, 
-        shouldIncludeLogo,
-        shouldIncludeText, 
-        format
-      );
-      mediaType = 'image';
+      console.log('🎬 Démarrage génération vidéo Veo...');
+      const operationName = await generateVideoWithVeo(prompt, format);
+
+      // Mise à jour Sheet
+      row.set('Statut', 'en cours vidéo');
+      row.set('Date génération', new Date().toLocaleString('fr-FR'));
+      await row.save();
+
+      return NextResponse.json({
+        success: true,
+        mediaType: 'video',
+        videoOperation: operationName,
+        imageUrl: null,
+        prompt,
+        remaining: pendingRows.length - 1,
+        message: 'Vidéo en cours de génération...'
+      });
     }
+
+    // IMAGE : appel direct à Gemini (comme avant)
+    let mediaUrl: string | null = null;
+    mediaUrl = await generateWithProductImage(
+      prompt, 
+      selectedImages, 
+      brandAssets, 
+      shouldIncludeLogo,
+      shouldIncludeText, 
+      format
+    );
     
     // Mise à jour du Sheet
     row.set('Statut', 'généré');
-    row.set('URL Image', mediaType === 'video' ? 'Vidéo générée' : 'Téléchargée localement');
+    row.set('URL Image', 'Téléchargée localement');
     row.set('Date génération', new Date().toLocaleString('fr-FR'));
     await row.save();
     
@@ -474,7 +449,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ 
       success: true, 
       imageUrl: mediaUrl,
-      mediaType: mediaType,
+      mediaType: 'image',
       prompt,
       remaining: pendingRows.length - 1,
     });
