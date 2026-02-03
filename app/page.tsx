@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 
 export default function Home() {
@@ -20,6 +20,15 @@ export default function Home() {
   const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
   const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string } | null>(null);
+
+  // Refs pour le mode auto — évite les closures stale
+  const isGeneratingRef = useRef(false);
+  const autoModeRef = useRef(false);
+  const videoPollingRef = useRef(videoPolling);
+
+  useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
+  useEffect(() => { autoModeRef.current = autoMode; }, [autoMode]);
+  useEffect(() => { videoPollingRef.current = videoPolling; }, [videoPolling]);
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString('fr-FR');
@@ -101,7 +110,19 @@ export default function Home() {
         console.log('📊 veo-poll résultat:', result);
 
         if (result.success && result.done && result.videoUri) {
-          // Vidéo prête !
+          // Vidéo prête ! — met à jour le sheet avant tout
+          addLog('📝 Mise à jour du sheet...');
+          try {
+            await fetch('/api/veo-complete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ operationName: videoPolling.operation }),
+            });
+            addLog('✅ Sheet mis à jour (Statut → généré)');
+          } catch (sheetErr: any) {
+            addLog(`⚠️ Erreur mise à jour sheet: ${sheetErr.message}`);
+          }
+
           addLog('✅ Vidéo générée avec succès !');
           setCurrentImage(result.videoUri);
           setCurrentPrompt(videoPolling.prompt);
@@ -129,10 +150,10 @@ export default function Home() {
             return updated;
           });
 
-          setStats(prev => ({ ...prev, generated: prev.generated + 1 }));
+          setStats(prev => ({ ...prev, generated: prev.generated + 1, remaining: prev.remaining - 1 }));
           setVideoPolling(null);
           localStorage.removeItem('videoPolling');
-
+          loadStats();
         } else if (result.pending) {
           // Pas encore prêt — reessayer dans 12s
           addLog('⏳ Vidéo encore en cours... (re-poll dans 12s)');
@@ -202,21 +223,37 @@ export default function Home() {
     }
   }, [generatedImages, batchCount]);
 
+  // MODE AUTO — boucle avec refs pour éviter closures stale
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    
-    if (autoMode && stats.remaining > 0) {
-      const generateLoop = async () => {
-        await generateSingle();
-        intervalId = setTimeout(generateLoop, 5000);
-      };
-      generateLoop();
+    if (autoMode) {
+      scheduleNext();
     }
-
     return () => {
-      if (intervalId) clearTimeout(intervalId);
+      if (autoTimerRef.current) {
+        clearTimeout(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
     };
   }, [autoMode]);
+
+  const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  function scheduleNext() {
+    if (!autoModeRef.current) return;
+    if (isGeneratingRef.current) {
+      autoTimerRef.current = setTimeout(scheduleNext, 3000);
+      return;
+    }
+    if (videoPollingRef.current) {
+      autoTimerRef.current = setTimeout(scheduleNext, 5000);
+      return;
+    }
+    generateSingle().then(() => {
+      if (autoModeRef.current) {
+        autoTimerRef.current = setTimeout(scheduleNext, 3000);
+      }
+    });
+  }
 
   async function loadStats() {
     try {

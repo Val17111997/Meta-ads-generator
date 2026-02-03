@@ -432,7 +432,8 @@ export async function POST(request: Request) {
     
     const pendingRows = rows.filter(row => {
       const status = row.get('Statut') || '';
-      return status.toLowerCase() !== 'généré';
+      const s = status.toLowerCase();
+      return s !== 'généré' && s !== 'en cours vidéo';
     });
     
     console.log(`⏳ Prompts en attente: ${pendingRows.length}`);
