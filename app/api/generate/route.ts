@@ -41,11 +41,12 @@ async function getSheetData(retries = 3) {
 // ============================================================
 // GÉNÉRATION VIDÉO avec Veo — predictLongRunning + polling
 // ============================================================
-// CORRECTIONS vs version précédente :
-//   1. Auth polling : ?key= comme query param (pas uniquement header)
-//   2. URL polling : exactement ${BASE_URL}/${operation.name}
-//   3. Parsing de la réponse start : on gère le cas où Google
-//      retourne un texte avec BOM ou whitespace
+// Timing budget (Vercel free = 60s max) :
+//   ~5s  : démarrage opération + overhead
+//   40s  : polling inline (4 × 10s)
+//   15s  : sheets save + proxy vidéo (si done)
+// Si pas done après 40s → on throw avec operation.name
+// → le frontend reprend via /api/veo-poll
 // ============================================================
 async function generateVideoWithVeo(
   prompt: string,
@@ -64,13 +65,10 @@ async function generateVideoWithVeo(
       console.log(`🎬 Tentative vidéo ${attempt}/${retries} (clé #${(currentKeyIndex % apiKeys.length) + 1})`);
 
       // ── Étape 1 : Lancer predictLongRunning ──
-      // Auth via ?key= (plus fiable que le header seul pour Gemini API)
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
 
       const requestBody = {
-        instances: [{
-          prompt: prompt
-        }],
+        instances: [{ prompt: prompt }],
         parameters: {
           aspectRatio: aspectRatio,
           durationSeconds: 8,
@@ -84,7 +82,7 @@ async function generateVideoWithVeo(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey, // double auth pour être sûr
+          'x-goog-api-key': apiKey,
         },
         body: JSON.stringify(requestBody)
       });
@@ -111,7 +109,7 @@ async function generateVideoWithVeo(
       }
 
       const startText = await startResponse.text();
-      console.log('📡 Réponse brute start (200 premiers chars):', startText.substring(0, 200));
+      console.log('📡 Réponse brute start:', startText.substring(0, 200));
 
       let operation: any;
       try {
@@ -128,22 +126,18 @@ async function generateVideoWithVeo(
 
       console.log('✅ Opération Veo démarrée:', operation.name);
 
-      // ── Étape 2 : Polling inline (max ~50s pour rester dans le timeout Vercel de 60s) ──
-      const maxPolls = 7; // 7 × 10s = 70s
+      // ── Étape 2 : Polling inline (4 × 10s = 40s max) ──
+      const maxPolls = 4; // 4 × 10s = 40s, garde ~20s pour sheets + proxy
       for (let poll = 1; poll <= maxPolls; poll++) {
         await new Promise(r => setTimeout(r, 10000));
         console.log(`⏳ Polling ${poll}/${maxPolls}...`);
 
-        // URL de polling : exactement comme dans les docs Google REST
-        //   GET ${BASE_URL}/${operation_name}?key=${apiKey}
         const checkUrl = `${BASE_URL}/${operation.name}?key=${apiKey}`;
         console.log('🔍 Poll URL:', checkUrl.replace(apiKey, 'KEY_REDACTED'));
 
         const checkResponse = await fetch(checkUrl, {
           method: 'GET',
-          headers: {
-            'x-goog-api-key': apiKey,
-          },
+          headers: { 'x-goog-api-key': apiKey },
           cache: 'no-store',
         });
 
@@ -161,7 +155,7 @@ async function generateVideoWithVeo(
         }
 
         const checkText = await checkResponse.text();
-        console.log('📡 Polling réponse brute (500 chars):', checkText.substring(0, 500));
+        console.log('📡 Polling réponse brute:', checkText.substring(0, 500));
 
         let updatedOp: any;
         try {
@@ -174,14 +168,11 @@ async function generateVideoWithVeo(
         console.log('📊 done:', updatedOp.done, '| keys:', Object.keys(updatedOp));
 
         if (updatedOp.done) {
-          // Erreur côté Veo (ex: contenu bloqué par safety filter)
           if (updatedOp.error) {
             console.error('❌ Erreur Veo dans operation:', JSON.stringify(updatedOp.error));
             throw new Error(`Veo erreur: ${updatedOp.error?.message || 'inconnue'}`);
           }
 
-          // Extraire l'URI — structure officielle Google :
-          //   response.generateVideoResponse.generatedSamples[0].video.uri
           const videoUri =
             updatedOp.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
             updatedOp.response?.generatedVideos?.[0]?.video?.uri ||
@@ -217,10 +208,10 @@ async function generateVideoWithVeo(
         }
       }
 
-      // ── Timeout polling après 50s ──
-      // On ne relance pas l'opération — elle existe déjà côté Google.
-      // On retourne l'operation.name pour que le frontend reprenne le polling via /api/veo-poll
-      console.log('⏰ Timeout polling après 50s. Operation:', operation.name);
+      // ── Timeout polling après 40s ──
+      // L'opération existe toujours côté Google — on ne la relance pas.
+      // On retourne operation.name pour que le frontend reprenne via /api/veo-poll
+      console.log('⏰ Timeout polling après 40s. Operation:', operation.name);
       throw new Error(`Timeout polling Veo | operation:${operation.name}`);
 
     } catch (error: any) {
@@ -238,7 +229,7 @@ async function generateVideoWithVeo(
 }
 
 // ============================================================
-// GÉNÉRATION IMAGE avec Gemini (inchangé)
+// GÉNÉRATION IMAGE avec Gemini
 // ============================================================
 async function generateWithProductImage(
   prompt: string, 
@@ -511,7 +502,7 @@ export async function POST(request: Request) {
     console.log('🎬 Type de contenu:', contentType);
     
     // ============================================================
-    // VIDEO : génération + polling inline
+    // VIDEO : génération + polling inline (40s) puis fallback frontend
     // ============================================================
     if (contentType === 'video') {
       console.log('🎬 Démarrage génération vidéo Veo...');
@@ -534,11 +525,11 @@ export async function POST(request: Request) {
           remaining: pendingRows.length - 1,
         });
       } catch (videoError: any) {
-        // Si timeout polling, retourner l'operation pour que le frontend reprend le polling
+        // Si timeout polling → retourner operation.name pour polling frontend
         const opMatch = videoError.message?.match(/operation:(.+)/);
         if (opMatch) {
           const operationName = opMatch[1];
-          console.log('⏳ Timeout inline, retourne l\'opération pour polling frontend:', operationName);
+          console.log('⏳ Timeout inline, retourne opération pour polling frontend:', operationName);
           
           row.set('Statut', 'en cours vidéo');
           row.set('URL Image', operationName);
