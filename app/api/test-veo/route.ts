@@ -1,158 +1,134 @@
 import { NextResponse } from 'next/server';
 
-/**
- * GET /api/test-veo
- * 
- * Route de diagnostic : lance une opération Veo, puis teste le polling
- * avec les DEUX méthodes d'authentification pour voir laquelle marche.
- * 
- * Appelle cette URL une fois, attends la réponse (peut prendre ~20-30s),
- * puis regarde le JSON retourné pour savoir ce qui marche.
- */
 export const dynamic = 'force-dynamic';
-export const maxDuration = 55; // Rester sous le timeout Vercel
+export const maxDuration = 110; // > 90s de polling
+
+const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 export async function GET() {
-  const apiKey = (process.env.GOOGLE_API_KEY || '').split(',')[0]?.trim();
-
+  const apiKey = process.env.GOOGLE_API_KEY?.split(',')[0]?.trim();
   if (!apiKey) {
-    return NextResponse.json({ error: 'Pas de clé API trouvée' }, { status: 500 });
+    return NextResponse.json({ error: 'No GOOGLE_API_KEY' }, { status: 500 });
   }
 
-  const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-  const results: any = { steps: [] };
+  const logs: string[] = [];
 
-  // ── Étape 1 : Lancer une opération Veo ──
-  results.steps.push('1. Lancement opération...');
+  // --- 1. Lance une opération Veo ---
+  logs.push('1. Lancement opération via predictLongRunning...');
 
-  const startRes = await fetch(`${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      instances: [{ prompt: 'A simple white cat sitting on a table' }],
-      parameters: {
-        aspectRatio: '16:9',
-        durationSeconds: 4,
-        resolution: '720p'
-      }
-    })
-  });
-
-  results.startStatus = startRes.status;
-
-  if (!startRes.ok) {
-    const errText = await startRes.text();
-    results.startError = errText.substring(0, 500);
-    results.steps.push(`❌ Échec démarrage: HTTP ${startRes.status}`);
-    return NextResponse.json(results);
-  }
+  const startRes = await fetch(
+    `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        instances: [{ prompt: 'A simple red ball bouncing on a white floor.' }],
+        parameters: { aspectRatio: '16:9', sampleCount: 1 },
+      }),
+    }
+  );
 
   const startData = await startRes.json();
-  results.operationName = startData.name;
-  results.steps.push(`✅ Opération lancée: ${startData.name}`);
-
   if (!startData.name) {
-    results.steps.push('❌ Pas de operation.name dans la réponse');
-    results.startResponse = startData;
-    return NextResponse.json(results);
+    return NextResponse.json({ error: 'Failed to start', startData }, { status: 500 });
   }
 
-  // ── Attendre 15s pour que l'opération existe bien ──
-  results.steps.push('2. Attente 15s...');
-  await new Promise(r => setTimeout(r, 15000));
+  const operationName = startData.name;
+  logs.push(`✅ Opération lancée: ${operationName}`);
 
-  // ── Étape 2 : Tester le polling avec 3 méthodes différentes ──
+  // --- 2. Teste aussi l'endpoint generateVideos (POST) pour comparaison ---
+  logs.push('2. Test parallèle: POST generateVideos...');
 
-  // MÉTHODE A : ?key= comme query param (comme dans les docs Google REST officiels)
-  results.steps.push('3. Test polling méthode A (?key= query param)...');
-  const urlA = `${BASE_URL}/${startData.name}?key=${apiKey}`;
-  const resA = await fetch(urlA, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-  });
-  let dataA: any;
-  try { dataA = await resA.json(); } catch { dataA = await resA.text(); }
+  let generateVideosResult: any = null;
+  try {
+    const gvRes = await fetch(
+      `${BASE_URL}/models/veo-3.1-generate-preview:generateVideos?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          prompt: 'A simple red ball bouncing on a white floor.',
+          config: { aspectRatio: '16:9' },
+        }),
+      }
+    );
+    generateVideosResult = {
+      status: gvRes.status,
+      body: await gvRes.json(),
+    };
+  } catch (e: any) {
+    generateVideosResult = { error: e.message };
+  }
+  logs.push(`   generateVideos result: ${JSON.stringify(generateVideosResult).slice(0, 300)}`);
 
-  results.methodA = {
-    url: urlA.replace(apiKey, 'KEY_REDACTED'),
-    status: resA.status,
-    done: dataA?.done,
-    hasError: !!dataA?.error,
-    keys: typeof dataA === 'object' ? Object.keys(dataA) : 'not-json',
-    // On montre la réponse complète pour diagnostic
-    response: typeof dataA === 'string' ? dataA.substring(0, 500) : dataA,
-  };
+  // --- 3. Polling prolongé sur l'opération predictLongRunning (90s) ---
+  logs.push('3. Polling prolongé (90s, toutes les 10s)...');
 
-  // MÉTHODE B : header x-goog-api-key uniquement (ce que ton code fait actuellement)
-  results.steps.push('4. Test polling méthode B (header x-goog-api-key)...');
-  const urlB = `${BASE_URL}/${startData.name}`;
-  const resB = await fetch(urlB, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    cache: 'no-store',
-  });
-  let dataB: any;
-  try { dataB = await resB.json(); } catch { dataB = await resB.text(); }
+  const pollResults: { t: number; keys: string[]; done?: boolean; response?: any; raw?: string }[] = [];
+  const startTime = Date.now();
 
-  results.methodB = {
-    url: urlB.replace(apiKey, 'KEY_REDACTED'),
-    status: resB.status,
-    done: dataB?.done,
-    hasError: !!dataB?.error,
-    keys: typeof dataB === 'object' ? Object.keys(dataB) : 'not-json',
-    response: typeof dataB === 'string' ? dataB.substring(0, 500) : dataB,
-  };
+  for (let i = 0; i < 9; i++) {
+    // Attends 10s avant chaque poll
+    await new Promise((r) => setTimeout(r, 10000));
 
-  // MÉTHODE C : Les deux en même temps
-  results.steps.push('5. Test polling méthode C (query param + header)...');
-  const urlC = `${BASE_URL}/${startData.name}?key=${apiKey}`;
-  const resC = await fetch(urlC, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    cache: 'no-store',
-  });
-  let dataC: any;
-  try { dataC = await resC.json(); } catch { dataC = await resC.text(); }
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-  results.methodC = {
-    url: urlC.replace(apiKey, 'KEY_REDACTED'),
-    status: resC.status,
-    done: dataC?.done,
-    hasError: !!dataC?.error,
-    keys: typeof dataC === 'object' ? Object.keys(dataC) : 'not-json',
-    response: typeof dataC === 'string' ? dataC.substring(0, 500) : dataC,
-  };
+    const pollUrl = `${BASE_URL}/${operationName}?key=${apiKey}`;
+    const pollRes = await fetch(pollUrl, {
+      headers: { 'x-goog-api-key': apiKey },
+      cache: 'no-store',
+    });
 
-  // ── Conclusion ──
-  results.steps.push('6. Analyse...');
+    const pollText = await pollRes.text();
+    let pollJson: any = {};
+    try {
+      pollJson = JSON.parse(pollText);
+    } catch {}
 
-  if (dataA?.done || dataB?.done || dataC?.done) {
-    results.conclusion = '✅ Le polling marche ! La vidéo est déjà prête (elle était rapide)';
-  } else {
-    // Aucune méthode ne donne done=true après 15s — normal, Veo prend 30-90s
-    // Le point important c'est de voir si les réponses sont identiques ou différentes
-    const aOk = resA.status === 200;
-    const bOk = resB.status === 200;
-    const cOk = resC.status === 200;
+    pollResults.push({
+      t: elapsed,
+      keys: Object.keys(pollJson),
+      done: pollJson.done,
+      response: pollJson.response ? pollJson.response : undefined,
+      raw: pollText.slice(0, 200),
+    });
 
-    if (aOk && bOk && cOk) {
-      // Toutes les méthodes donnent 200 — le problème n'est pas l'auth
-      // Il faut juste attendre plus longtemps
-      results.conclusion = '✅ Les 3 méthodes donnent HTTP 200. Le polling est correct — il faut simplement attendre que done=true. La vidéo n\'est pas encore prête après 15s (normal, Veo prend 30-90s). Déploie les fichiers corrects et teste avec un polling plus long.';
-    } else {
-      results.conclusion = `⚠️ Résultats mixtes: A=${resA.status}, B=${resB.status}, C=${resC.status}. Vérifie les détails ci-dessous.`;
+    logs.push(`   [${elapsed}s] keys=${JSON.stringify(Object.keys(pollJson))} done=${pollJson.done ?? 'absent'}`);
+
+    // Si done:true, on s'arrête
+    if (pollJson.done === true) {
+      logs.push(`   🎉 done:true trouvé à ${elapsed}s !`);
+      break;
     }
   }
 
-  return NextResponse.json(results, { headers: { 'Cache-Control': 'no-store' } });
+  // --- 4. Si generateVideos a retourné une opération, on la pollé aussi ---
+  let generateVideosPolling: any[] = [];
+  if (generateVideosResult?.body?.name) {
+    const gvOpName = generateVideosResult.body.name;
+    logs.push(`4. Polling sur l'opération generateVideos: ${gvOpName}`);
+
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 10000));
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      const gvPollRes = await fetch(`${BASE_URL}/${gvOpName}?key=${apiKey}`, {
+        headers: { 'x-goog-api-key': apiKey },
+        cache: 'no-store',
+      });
+      const gvPollJson = await gvPollRes.json();
+      generateVideosPolling.push({ t: elapsed, keys: Object.keys(gvPollJson), done: gvPollJson.done });
+      logs.push(`   [${elapsed}s] keys=${JSON.stringify(Object.keys(gvPollJson))} done=${gvPollJson.done ?? 'absent'}`);
+
+      if (gvPollJson.done === true) break;
+    }
+  }
+
+  return NextResponse.json({
+    logs,
+    operationName,
+    generateVideosResult,
+    pollResults,
+    generateVideosPolling,
+  });
 }
