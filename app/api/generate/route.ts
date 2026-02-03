@@ -39,25 +39,33 @@ async function getSheetData(retries = 3) {
 }
 
 // ============================================================
-// GÉNÉRATION VIDÉO avec Veo - predictLongRunning + polling
+// GÉNÉRATION VIDÉO avec Veo — predictLongRunning + polling
+// ============================================================
+// CORRECTIONS vs version précédente :
+//   1. Auth polling : ?key= comme query param (pas uniquement header)
+//   2. URL polling : exactement ${BASE_URL}/${operation.name}
+//   3. Parsing de la réponse start : on gère le cas où Google
+//      retourne un texte avec BOM ou whitespace
 // ============================================================
 async function generateVideoWithVeo(
   prompt: string,
   format: string = '9:16',
   retries = 3
 ): Promise<string | null> {
-  const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
+  const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
   let currentKeyIndex = 0;
 
   const aspectRatio = (format === '16:9' || format === '9:16') ? format : '9:16';
+  const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
       console.log(`🎬 Tentative vidéo ${attempt}/${retries} (clé #${(currentKeyIndex % apiKeys.length) + 1})`);
 
-      // --- Étape 1 : Lancer l'opération predictLongRunning ---
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning`;
+      // ── Étape 1 : Lancer predictLongRunning ──
+      // Auth via ?key= (plus fiable que le header seul pour Gemini API)
+      const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
 
       const requestBody = {
         instances: [{
@@ -66,15 +74,18 @@ async function generateVideoWithVeo(
         parameters: {
           aspectRatio: aspectRatio,
           durationSeconds: 8,
-          resolution: "720p"
+          resolution: '720p'
         }
       };
 
       console.log('📦 Request body:', JSON.stringify(requestBody));
 
-      const startResponse = await fetch(url, {
+      const startResponse = await fetch(startUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey, // double auth pour être sûr
+        },
         body: JSON.stringify(requestBody)
       });
 
@@ -95,52 +106,66 @@ async function generateVideoWithVeo(
 
       if (!startResponse.ok) {
         const errorText = await startResponse.text();
-        console.error('❌ Erreur démarrage Veo:', errorText);
+        console.error('❌ Erreur démarrage Veo:', errorText.substring(0, 300));
         throw new Error(`Veo HTTP ${startResponse.status}: ${errorText.substring(0, 200)}`);
       }
 
       const startText = await startResponse.text();
-      console.log('📡 Réponse brute (200 premiers chars):', startText.substring(0, 200));
+      console.log('📡 Réponse brute start (200 premiers chars):', startText.substring(0, 200));
 
       let operation: any;
       try {
-        operation = JSON.parse(startText);
+        operation = JSON.parse(startText.trim());
       } catch {
         console.error('❌ Réponse non-JSON de Veo:', startText.substring(0, 500));
         throw new Error(`Veo texte non-JSON: ${startText.substring(0, 150)}`);
       }
-
-      console.log('⏳ Opération lancée:', operation.name);
 
       if (!operation.name) {
         console.error('❌ Pas de operation.name:', JSON.stringify(operation));
         throw new Error('Pas de operation name retourné par Veo');
       }
 
-      console.log('✅ Opération Veo démarrée, début polling...');
+      console.log('✅ Opération Veo démarrée:', operation.name);
 
-      // --- Étape 2 : Polling jusqu'à done=true
-      // On reste dans les 55s pour avoir de la marge sur les 60s Vercel
-      // Veo peut prendre 30-90s — on fait du mieux dans la contrainte
+      // ── Étape 2 : Polling inline (max ~50s pour rester dans le timeout Vercel de 60s) ──
       const maxPolls = 5; // 5 × 10s = 50s
       for (let poll = 1; poll <= maxPolls; poll++) {
         await new Promise(r => setTimeout(r, 10000));
         console.log(`⏳ Polling ${poll}/${maxPolls}...`);
 
-        const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operation.name}`;
-        const checkResponse = await fetch(checkUrl, { headers: { 'x-goog-api-key': apiKey } });
+        // URL de polling : exactement comme dans les docs Google REST
+        //   GET ${BASE_URL}/${operation_name}?key=${apiKey}
+        const checkUrl = `${BASE_URL}/${operation.name}?key=${apiKey}`;
+        console.log('🔍 Poll URL:', checkUrl.replace(apiKey, 'KEY_REDACTED'));
+
+        const checkResponse = await fetch(checkUrl, {
+          method: 'GET',
+          headers: {
+            'x-goog-api-key': apiKey,
+          },
+          cache: 'no-store',
+        });
+
+        console.log('📊 Poll HTTP status:', checkResponse.status);
+
+        if (checkResponse.status === 429) {
+          console.log('⚠️ Rate limit sur le poll, on continue...');
+          continue;
+        }
 
         if (!checkResponse.ok) {
-          console.error('❌ Erreur polling:', await checkResponse.text());
+          const errText = await checkResponse.text();
+          console.error('❌ Erreur polling:', errText.substring(0, 300));
           continue;
         }
 
         const checkText = await checkResponse.text();
-        console.log('📡 Polling réponse brute:', checkText.substring(0, 500));
+        console.log('📡 Polling réponse brute (500 chars):', checkText.substring(0, 500));
 
         let updatedOp: any;
         try {
-          updatedOp = JSON.parse(checkText);
+          updatedOp = JSON.parse(checkText.trim());
         } catch {
           console.error('❌ Polling réponse non-JSON:', checkText.substring(0, 300));
           continue;
@@ -149,30 +174,27 @@ async function generateVideoWithVeo(
         console.log('📊 done:', updatedOp.done, '| keys:', Object.keys(updatedOp));
 
         if (updatedOp.done) {
-          // Erreur côté Veo (ex: contenu bloqué par RAI)
+          // Erreur côté Veo (ex: contenu bloqué par safety filter)
           if (updatedOp.error) {
-            console.error('❌ Erreur Veo dans operation:', updatedOp.error);
+            console.error('❌ Erreur Veo dans operation:', JSON.stringify(updatedOp.error));
             throw new Error(`Veo erreur: ${updatedOp.error?.message || 'inconnue'}`);
           }
 
-          // Essayer les deux structures possibles :
-          // 1) Gemini API: response.generateVideoResponse.generatedSamples[0].video.uri
-          // 2) Vertex AI:  response.videos[0].uri  (ou gcsUri)
+          // Extraire l'URI — structure officielle Google :
+          //   response.generateVideoResponse.generatedSamples[0].video.uri
           const videoUri =
             updatedOp.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-            updatedOp.response?.videos?.[0]?.uri ||
-            updatedOp.response?.videos?.[0]?.gcsUri;
+            updatedOp.response?.generatedVideos?.[0]?.video?.uri ||
+            updatedOp.response?.videos?.[0]?.uri;
 
           if (!videoUri) {
-            console.error('❌ done=true mais URI introuvable. Réponse complète:', JSON.stringify(updatedOp));
+            console.error('❌ done=true mais URI introuvable. Réponse:', JSON.stringify(updatedOp).substring(0, 800));
             throw new Error(`Veo done mais pas de vidéo dans la réponse`);
           }
 
-          console.log('✅ Vidéo générée ! URI:', videoUri);
-          console.log('📥 Téléchargement vidéo côté serveur (proxy auth)...');
+          console.log('✅ Vidéo générée ! URI:', videoUri.substring(0, 80) + '...');
 
-          // L'URI Veo nécessite x-goog-api-key + suivre les redirects
-          // Le frontend ne peut pas faire ça (CORS) — on proxy ici
+          // Proxy : télécharger la vidéo côté serveur
           try {
             const videoRes = await fetch(videoUri, {
               headers: { 'x-goog-api-key': apiKey },
@@ -182,26 +204,28 @@ async function generateVideoWithVeo(
               const videoBuffer = await videoRes.arrayBuffer();
               const base64 = Buffer.from(videoBuffer).toString('base64');
               const mimeType = videoRes.headers.get('content-type') || 'video/mp4';
-              console.log(`✅ Vidéo proxy OK (${(videoBuffer.byteLength / 1024 / 1024).toFixed(2)} MB, ${mimeType})`);
+              console.log(`✅ Vidéo proxy OK (${(videoBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)`);
               return `data:${mimeType};base64,${base64}`;
             } else {
               console.warn(`⚠️ Proxy vidéo échoué (${videoRes.status}), retourne URI brute`);
               return videoUri;
             }
           } catch (dlErr: any) {
-            console.warn('⚠️ Erreur download vidéo:', dlErr.message, '— retourne URI brute');
+            console.warn('⚠️ Erreur download vidéo:', dlErr.message);
             return videoUri;
           }
         }
       }
 
-      // Timeout polling — on retourne l'operation.name pour que le frontend puisse reprendre le polling
+      // ── Timeout polling après 50s ──
+      // On ne relance pas l'opération — elle existe déjà côté Google.
+      // On retourne l'operation.name pour que le frontend reprenne le polling via /api/veo-poll
       console.log('⏰ Timeout polling après 50s. Operation:', operation.name);
       throw new Error(`Timeout polling Veo | operation:${operation.name}`);
 
     } catch (error: any) {
       console.error(`❌ Tentative ${attempt} échouée:`, error.message);
-      // Ne pas retry si c'est un timeout polling — l'opération existe déjà, on ne relance pas
+      // Ne pas retry si c'est un timeout polling — l'opération existe déjà
       if (error.message.includes('Timeout polling') || error.message.includes('done mais pas de vidéo')) {
         throw error;
       }
@@ -234,7 +258,7 @@ async function generateWithProductImage(
     console.log('🏷️ Inclusion logo:', shouldIncludeLogo);
     console.log('📝 Inclusion texte:', shouldIncludeText);
     
-    const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
+    const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
     let currentKeyIndex = 0;
     
     const productParts = productImagesBase64.map(imgBase64 => {
@@ -487,7 +511,7 @@ export async function POST(request: Request) {
     console.log('🎬 Type de contenu:', contentType);
     
     // ============================================================
-    // VIDEO : génération + polling inline (comme les images)
+    // VIDEO : génération + polling inline
     // ============================================================
     if (contentType === 'video') {
       console.log('🎬 Démarrage génération vidéo Veo...');
@@ -495,7 +519,6 @@ export async function POST(request: Request) {
       try {
         const videoUri = await generateVideoWithVeo(prompt, format);
 
-        // Mise à jour Sheet
         row.set('Statut', 'généré');
         row.set('URL Image', videoUri);
         row.set('Date génération', new Date().toLocaleString('fr-FR'));
@@ -515,10 +538,10 @@ export async function POST(request: Request) {
         const opMatch = videoError.message?.match(/operation:(.+)/);
         if (opMatch) {
           const operationName = opMatch[1];
-          console.log('⏳ Timeout inline, on retourne l\'opération pour polling frontend:', operationName);
+          console.log('⏳ Timeout inline, retourne l\'opération pour polling frontend:', operationName);
           
           row.set('Statut', 'en cours vidéo');
-          row.set('URL Image', operationName); // stocke l'operation name pour reprendre
+          row.set('URL Image', operationName);
           row.set('Date génération', new Date().toLocaleString('fr-FR'));
           await row.save();
 
@@ -532,12 +555,13 @@ export async function POST(request: Request) {
             message: 'Vidéo en cours — polling à reprendre',
           });
         }
-        // Autre erreur — on re-throw
         throw videoError;
       }
     }
 
-    // IMAGE : appel direct à Gemini (comme avant)
+    // ============================================================
+    // IMAGE : appel direct à Gemini
+    // ============================================================
     let mediaUrl: string | null = null;
     mediaUrl = await generateWithProductImage(
       prompt, 
@@ -548,7 +572,6 @@ export async function POST(request: Request) {
       format
     );
     
-    // Mise à jour du Sheet
     row.set('Statut', 'généré');
     row.set('URL Image', 'Téléchargée localement');
     row.set('Date génération', new Date().toLocaleString('fr-FR'));
