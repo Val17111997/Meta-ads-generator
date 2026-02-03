@@ -117,8 +117,49 @@ async function generateVideoWithVeo(
         throw new Error('Pas de operation name retourné par Veo');
       }
 
-      console.log('✅ Opération Veo démarrée');
-      return operation.name;
+      console.log('✅ Opération Veo démarrée, début polling...');
+
+      // --- Étape 2 : Polling jusqu'à done=true (max 40s pour rester dans les 60s) ---
+      const maxPolls = 4; // 4 × 10s = 40s max
+      for (let poll = 1; poll <= maxPolls; poll++) {
+        await new Promise(r => setTimeout(r, 10000));
+        console.log(`⏳ Polling ${poll}/${maxPolls}...`);
+
+        const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operation.name}?key=${apiKey}`;
+        const checkResponse = await fetch(checkUrl);
+
+        if (!checkResponse.ok) {
+          console.error('❌ Erreur polling:', await checkResponse.text());
+          continue;
+        }
+
+        const checkText = await checkResponse.text();
+        let updatedOp: any;
+        try {
+          updatedOp = JSON.parse(checkText);
+        } catch {
+          console.error('❌ Polling réponse non-JSON:', checkText.substring(0, 300));
+          continue;
+        }
+
+        console.log('📊 done:', updatedOp.done);
+
+        if (updatedOp.done) {
+          const videoUri = updatedOp.response?.videos?.[0]?.uri;
+          if (videoUri) {
+            console.log('✅ Vidéo générée ! URI récupérée.');
+            return videoUri;
+          }
+          // done=true mais pas de vidéo — peut être une erreur dans response
+          const errorMsg = updatedOp.error?.message || 'URI absente';
+          console.error('❌ done=true mais pas de vidéo:', errorMsg, JSON.stringify(updatedOp));
+          throw new Error(`Veo done mais pas de vidéo: ${errorMsg}`);
+        }
+      }
+
+      // Timeout polling — on throw pour déclencher le retry avec une autre clé
+      console.log('⏰ Timeout polling après 40s, retry...');
+      throw new Error('Timeout polling Veo');
 
     } catch (error: any) {
       console.error(`❌ Tentative ${attempt} échouée:`, error.message);
@@ -404,26 +445,26 @@ export async function POST(request: Request) {
     console.log('🎬 Type de contenu:', contentType);
     
     // ============================================================
-    // VIDEO : lance l'opération Veo et retourne immédiatement
-    // Le frontend fera le polling via /api/veo-poll
+    // VIDEO : génération + polling inline (comme les images)
     // ============================================================
     if (contentType === 'video') {
       console.log('🎬 Démarrage génération vidéo Veo...');
-      const operationName = await generateVideoWithVeo(prompt, format);
+      const videoUri = await generateVideoWithVeo(prompt, format);
 
       // Mise à jour Sheet
-      row.set('Statut', 'en cours vidéo');
+      row.set('Statut', 'généré');
+      row.set('URL Image', videoUri);
       row.set('Date génération', new Date().toLocaleString('fr-FR'));
       await row.save();
+
+      console.log('✅ Vidéo générée et Sheet mis à jour');
 
       return NextResponse.json({
         success: true,
         mediaType: 'video',
-        videoOperation: operationName,
-        imageUrl: null,
+        imageUrl: videoUri,
         prompt,
         remaining: pendingRows.length - 1,
-        message: 'Vidéo en cours de génération...'
       });
     }
 
