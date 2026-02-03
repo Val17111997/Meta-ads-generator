@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
 import { JWT } from 'google-auth-library';
 
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 async function getSheetData(retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -35,217 +38,121 @@ async function getSheetData(retries = 3) {
   throw new Error('Échec après plusieurs tentatives');
 }
 
-async function generateVideoWithVeo3(
+// ============================================================
+// GÉNÉRATION VIDÉO avec Veo - predictLongRunning + polling
+// ============================================================
+async function generateVideoWithVeo(
   prompt: string,
-  productImagesBase64: string[],
-  brandAssetsData: { url: string; type: 'logo' | 'palette' | 'style' }[] = [],
-  shouldIncludeLogo: boolean = false,
-  shouldIncludeText: boolean = true,
   format: string = '9:16',
-  retries = 5
-) {
-  try {
-    console.log('🎬 Génération vidéo avec Veo 3.1 (multi-image reference)');
-    console.log('📸 Prompt:', prompt);
-    console.log('📐 Format:', format);
-    console.log('🖼️ Nombre d\'images produit disponibles:', productImagesBase64.length);
-    
-    const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
-    let currentKeyIndex = 0;
-    
-    // TEMPORAIRE : Limiter à 1 image pour éviter erreur 400
-    const maxReferenceImages = 1; // Au lieu de 3
-    const productReferences = productImagesBase64.slice(0, maxReferenceImages);
-    console.log(`🖼️ Utilisation de ${productReferences.length} image(s) produit comme référence(s)`);
-    
-    // Compresser les images pour Veo (max 1024x1024, qualité 60%)
-    const compressImageForVeo = (base64: string): string => {
-      try {
-        // Si l'image est trop grande, la retourner telle quelle (sera gérée par le canvas côté client)
-        // Pour l'instant, on envoie directement
-        return base64;
-      } catch (e) {
-        return base64;
-      }
-    };
-    
-    const imageParts = productReferences.map(imgBase64 => {
-      const base64Data = imgBase64.split(',')[1] || imgBase64;
-      // Limiter la taille de chaque image à ~500KB en base64 (≈375KB en bytes)
-      const maxBase64Length = 500000;
-      const trimmedData = base64Data.length > maxBase64Length 
-        ? base64Data.substring(0, maxBase64Length) 
-        : base64Data;
-      
-      return {
-        inlineData: {
-          mimeType: 'image/jpeg', // JPEG au lieu de PNG pour Veo
-          data: trimmedData
-        }
+  retries = 3
+): Promise<string | null> {
+  const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
+  let currentKeyIndex = 0;
+
+  const aspectRatio = (format === '16:9' || format === '9:16') ? format : '9:16';
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
+      console.log(`🎬 Tentative vidéo ${attempt}/${retries} (clé #${(currentKeyIndex % apiKeys.length) + 1})`);
+
+      // --- Étape 1 : Lancer l'opération predictLongRunning ---
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
+
+      const requestBody = {
+        instances: [{
+          prompt: prompt,
+          config: {
+            aspectRatio: aspectRatio,
+            durationSeconds: 8,
+            resolution: "720p"
+          }
+        }]
       };
-    });
-    
-    const remainingSlots = maxReferenceImages - productReferences.length;
-    const brandParts = brandAssetsData
-      .filter(asset => shouldIncludeLogo ? true : asset.type !== 'logo')
-      .slice(0, remainingSlots)
-      .map(asset => {
-        const base64Data = asset.url.split(',')[1] || asset.url;
-        return {
-          inlineData: {
-            mimeType: 'image/png',
-            data: base64Data
-          }
-        };
+
+      console.log('📦 Request body:', JSON.stringify(requestBody));
+
+      const startResponse = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
       });
-    
-    if (brandParts.length > 0) {
-      console.log(`🎨 Ajout de ${brandParts.length} asset(s) de marque comme référence(s)`);
-    }
-    
-    let videoInstructions = `Create a professional Meta ad video featuring the product(s) shown in the reference images. ${prompt}.
 
-VIDEO GENERATION RULES:
-- Use the ${productReferences.length} product image(s) provided as visual references
-- Smooth, cinematic camera movements (zoom, pan, dolly, rotate)
-- Keep all products clearly visible and recognizable throughout the video
-- Professional lighting and composition
-- Eye-catching motion perfect for social media advertising
-- 8 seconds duration
-- High quality, polished result`;
+      console.log('📊 Status démarrage:', startResponse.status);
 
-    if (shouldIncludeText) {
-      videoInstructions += '\n- Add compelling French marketing text overlay that remains readable throughout';
-    } else {
-      videoInstructions += '\n- NO text or words on the video - pure visual storytelling only';
-    }
-    
-    if (shouldIncludeLogo && brandParts.length > 0) {
-      videoInstructions += '\n- Incorporate the brand logo naturally and subtly in the composition';
-    }
-    
-    // TEST : Version simplifiée sans images pour debug
-    console.log('🧪 TEST: Génération Veo sans images de référence');
-    
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        console.log(`🔄 Tentative ${attempt}/${retries}...`);
-        
-        const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
-        console.log(`🔑 Utilisation clé API #${(currentKeyIndex % apiKeys.length) + 1}`);
-        
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  {
-                    text: `A beautiful product video. ${prompt}. Smooth camera movement. 8 seconds. High quality.`
-                  }
-                ]
-              }],
-              generationConfig: {
-                videoConfig: {
-                  aspectRatio: format,
-                  duration: '8s'
-                }
-              }
-            }),
-          }
-        );
-
-        console.log('📡 Status réponse:', response.status);
-        console.log('📡 Headers:', JSON.stringify(Object.fromEntries(response.headers)));
-        
-        const responseText = await response.text();
-        console.log('📡 Réponse brute (300 premiers chars):', responseText.substring(0, 300));
-
-        if (response.status === 503) {
-          console.log('⚠️ Serveur surchargé (503)...');
-          if (attempt < retries) {
-            const waitTime = attempt * 3000;
-            console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-          throw new Error('Serveurs Google surchargés. Réessaye dans quelques minutes.');
-        }
-
-        if (response.status === 429) {
-          console.log('⚠️ Limite de débit atteinte (429)...');
-          currentKeyIndex++;
-          if (attempt < retries) {
-            const waitTime = apiKeys.length > 1 ? 2000 : 10000 + (attempt * 5000);
-            console.log(`⏳ Attente ${waitTime/1000}s avant retry avec ${apiKeys.length > 1 ? 'clé suivante' : 'même clé'}...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-          throw new Error('Limite de requêtes atteinte. Attends quelques minutes avant de réessayer.');
-        }
-
-        if (!response.ok) {
-          const errorText = responseText;
-          console.error('❌ Erreur API Veo:', errorText.substring(0, 500));
-          throw new Error(`Erreur API Veo: ${response.status}`);
-        }
-
-        let data;
-        try {
-          data = JSON.parse(responseText);
-        } catch (e) {
-          console.error('❌ Impossible de parser la réponse JSON');
-          throw new Error('Réponse invalide de Veo');
-        }
-        console.log('📦 Réponse Veo reçue');
-        console.log('🔍 Structure réponse:', JSON.stringify(data).substring(0, 500));
-        
-        if (!data.candidates || data.candidates.length === 0) {
-          console.error('❌ Aucun candidat dans la réponse');
-          console.error('Réponse complète:', JSON.stringify(data));
-          throw new Error('Aucune vidéo générée');
-        }
-        
-        const candidate = data.candidates[0];
-        console.log('🔍 Candidate structure:', Object.keys(candidate));
-        
-        const parts = candidate.content?.parts || [];
-        console.log('🔍 Nombre de parts:', parts.length);
-        console.log('🔍 Types de parts:', parts.map((p: any) => Object.keys(p)));
-        
-        const videoPart = parts.find((part: any) => part.inlineData);
-        
-        if (!videoPart?.inlineData?.data) {
-          console.error('❌ Pas de inlineData trouvé');
-          console.error('Parts disponibles:', JSON.stringify(parts).substring(0, 500));
-          throw new Error('Pas de données vidéo dans la réponse');
-        }
-        
-        const videoUrl = `data:video/mp4;base64,${videoPart.inlineData.data}`;
-        console.log('✅ Vidéo générée avec succès avec multi-image reference');
-        
-        return videoUrl;
-        
-      } catch (error: any) {
-        if (attempt === retries) {
-          throw error;
-        }
-        console.log(`❌ Tentative ${attempt} échouée, retry...`);
+      if (startResponse.status === 429) {
+        console.log('⚠️ Rate limit (429), on change de clé...');
+        currentKeyIndex++;
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
       }
+
+      if (startResponse.status === 503) {
+        console.log('⚠️ Serveur surchargé (503), retry...');
+        await new Promise(r => setTimeout(r, attempt * 3000));
+        continue;
+      }
+
+      if (!startResponse.ok) {
+        const errorText = await startResponse.text();
+        console.error('❌ Erreur démarrage Veo:', errorText);
+        throw new Error(`Veo HTTP ${startResponse.status}: ${errorText.substring(0, 200)}`);
+      }
+
+      const operation = await startResponse.json();
+      console.log('⏳ Opération lancée:', operation.name);
+
+      if (!operation.name) {
+        console.error('❌ Pas de operation.name dans la réponse:', JSON.stringify(operation));
+        throw new Error('Pas de operation name retourné par Veo');
+      }
+
+      // --- Étape 2 : Polling jusqu'à done=true (max ~50s) ---
+      const maxPolls = 5; // 5 × 10s = 50s max (reste 10s de marge sur maxDuration=60)
+      for (let poll = 1; poll <= maxPolls; poll++) {
+        await new Promise(r => setTimeout(r, 10000));
+        console.log(`⏳ Polling ${poll}/${maxPolls}...`);
+
+        const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operation.name}?key=${apiKey}`;
+        const checkResponse = await fetch(checkUrl);
+
+        if (!checkResponse.ok) {
+          console.error('❌ Erreur polling:', await checkResponse.text());
+          continue;
+        }
+
+        const updatedOp = await checkResponse.json();
+        console.log('📊 done:', updatedOp.done);
+
+        if (updatedOp.done) {
+          // Extraire l'URI vidéo
+          const videoUri = updatedOp.response?.videos?.[0]?.uri;
+          if (videoUri) {
+            console.log('✅ Vidéo générée !');
+            return videoUri;
+          }
+          console.error('❌ done=true mais pas de vidéo. Réponse:', JSON.stringify(updatedOp));
+          throw new Error('Vidéo générée mais URI absente');
+        }
+      }
+
+      // Timeout polling
+      console.log('⏰ Timeout polling après 50s');
+      throw new Error('Timeout: vidéo pas prête après 50s');
+
+    } catch (error: any) {
+      console.error(`❌ Tentative ${attempt} échouée:`, error.message);
+      if (attempt === retries) throw error;
+      await new Promise(r => setTimeout(r, 2000));
     }
-    
-    throw new Error('Échec après plusieurs tentatives');
-    
-  } catch (error: any) {
-    console.error('❌ Erreur:', error.message);
-    throw error;
   }
+
+  throw new Error('Échec génération vidéo après toutes les tentatives');
 }
 
+// ============================================================
+// GÉNÉRATION IMAGE avec Gemini (inchangé)
+// ============================================================
 async function generateWithProductImage(
   prompt: string, 
   productImagesBase64: string[], 
@@ -420,6 +327,9 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, tit
   }
 }
 
+// ============================================================
+// HANDLER POST principal
+// ============================================================
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -512,33 +422,19 @@ export async function POST(request: Request) {
     console.log('🚀 Génération:', prompt);
     console.log('📐 Format demandé:', format);
     console.log('🎬 Type de contenu:', contentType);
-    console.log('🖼️ Images sélectionnées:', selectedImages.length);
-    if (brandAssets.length > 0) {
-      console.log('🎨 Assets de marque disponibles:', brandAssets.length);
-      console.log(`🏷️ Logo: ${shouldIncludeLogo ? 'OUI' : 'NON'}`);
-    }
-    console.log(`📝 Texte sur ${contentType}: ${shouldIncludeText ? 'OUI' : 'NON'}`);
     
     let mediaUrl: string | null = null;
     let mediaType: string;
     
+    // ============================================================
+    // VIDEO : appel direct à Veo predictLongRunning (comme les images)
+    // ============================================================
     if (contentType === 'video') {
-      // Pour les vidéos, on marque "en cours vidéo" et le cron job s'en occupera
-      row.set('Statut', 'en cours vidéo');
-      row.set('Date génération', new Date().toLocaleString('fr-FR'));
-      await row.save();
-      
-      console.log('🎬 Vidéo mise en file d\'attente pour le cron job');
-      
-      return NextResponse.json({ 
-        success: true, 
-        imageUrl: null,
-        mediaType: 'video',
-        prompt,
-        remaining: pendingRows.length - 1,
-        message: 'Vidéo en cours de génération (traitement dans 1-2 minutes)'
-      });
+      console.log('🎬 Génération vidéo directe avec Veo...');
+      mediaUrl = await generateVideoWithVeo(prompt, format);
+      mediaType = 'video';
     } else {
+      // IMAGE : appel direct à Gemini (comme avant)
       mediaUrl = await generateWithProductImage(
         prompt, 
         selectedImages, 
@@ -550,8 +446,9 @@ export async function POST(request: Request) {
       mediaType = 'image';
     }
     
+    // Mise à jour du Sheet
     row.set('Statut', 'généré');
-    row.set('URL Image', 'Téléchargée localement');
+    row.set('URL Image', mediaType === 'video' ? 'Vidéo générée' : 'Téléchargée localement');
     row.set('Date génération', new Date().toLocaleString('fr-FR'));
     await row.save();
     
