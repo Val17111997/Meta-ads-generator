@@ -129,7 +129,7 @@ async function generateVideoWithVeo(
       console.log('✅ Opération Veo démarrée:', operation.name);
 
       // ── Étape 2 : Polling inline (max ~50s pour rester dans le timeout Vercel de 60s) ──
-      const maxPolls = 5; // 5 × 10s = 50s
+      const maxPolls = 7; // 7 × 10s = 70s
       for (let poll = 1; poll <= maxPolls; poll++) {
         await new Promise(r => setTimeout(r, 10000));
         console.log(`⏳ Polling ${poll}/${maxPolls}...`);
