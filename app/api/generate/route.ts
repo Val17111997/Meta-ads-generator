@@ -68,11 +68,17 @@ async function generateVideoWithVeo(
       // ── Étape 1 : Lancer predictLongRunning ──
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
       // Prépare les referenceImages pour Veo (max 3, base64 sans le préfixe data:)
-      const refImages = referenceImages.slice(0, 3).map(img => ({
-        bytesBase64Encoded: img.split(',')[1] || img,
-        mimeType: 'image/jpeg'
-      }));
-
+      const refImages = referenceImages.slice(0, 3).map(img => {
+        const mimeMatch = img.match(/^data:(image\/[a-z]+);base64,/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/webp';
+        return {
+          image: {
+            bytesBase64Encoded: img.split(',')[1] || img,
+            mimeType: mimeType
+          },
+          referenceType: 'asset'
+        };
+      });
       const requestBody: any = {
         instances: [{ prompt: prompt }],
         parameters: {
