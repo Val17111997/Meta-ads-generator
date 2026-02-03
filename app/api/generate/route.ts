@@ -51,6 +51,7 @@ async function getSheetData(retries = 3) {
 async function generateVideoWithVeo(
   prompt: string,
   format: string = '9:16',
+  referenceImages: string[] = [],
   retries = 3
 ): Promise<string | null> {
   const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
@@ -66,8 +67,13 @@ async function generateVideoWithVeo(
 
       // ── Étape 1 : Lancer predictLongRunning ──
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
+      // Prépare les referenceImages pour Veo (max 3, base64 sans le préfixe data:)
+      const refImages = referenceImages.slice(0, 3).map(img => ({
+        bytesBase64Encoded: img.split(',')[1] || img,
+        mimeType: 'image/jpeg'
+      }));
 
-      const requestBody = {
+      const requestBody: any = {
         instances: [{ prompt: prompt }],
         parameters: {
           aspectRatio: aspectRatio,
@@ -75,6 +81,12 @@ async function generateVideoWithVeo(
           resolution: '720p'
         }
       };
+
+      // Ajoute les images produit comme references si disponibles
+      if (refImages.length > 0) {
+        requestBody.instances[0].referenceImages = refImages;
+        console.log(`🖼️ ${refImages.length} image(s) produit ajoutée(s) comme référence`);
+      }
 
       console.log('📦 Request body:', JSON.stringify(requestBody));
 
@@ -509,7 +521,7 @@ export async function POST(request: Request) {
       console.log('🎬 Démarrage génération vidéo Veo...');
       
       try {
-        const videoUri = await generateVideoWithVeo(prompt, format);
+        const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
 
         row.set('Statut', 'généré');
         row.set('URL Image', videoUri);
