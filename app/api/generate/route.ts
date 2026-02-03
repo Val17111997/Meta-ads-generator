@@ -99,11 +99,21 @@ async function generateVideoWithVeo(
         throw new Error(`Veo HTTP ${startResponse.status}: ${errorText.substring(0, 200)}`);
       }
 
-      const operation = await startResponse.json();
+      const startText = await startResponse.text();
+      console.log('📡 Réponse brute (200 premiers chars):', startText.substring(0, 200));
+
+      let operation: any;
+      try {
+        operation = JSON.parse(startText);
+      } catch {
+        console.error('❌ Réponse non-JSON de Veo:', startText.substring(0, 500));
+        throw new Error(`Veo texte non-JSON: ${startText.substring(0, 150)}`);
+      }
+
       console.log('⏳ Opération lancée:', operation.name);
 
       if (!operation.name) {
-        console.error('❌ Pas de operation.name dans la réponse:', JSON.stringify(operation));
+        console.error('❌ Pas de operation.name:', JSON.stringify(operation));
         throw new Error('Pas de operation name retourné par Veo');
       }
 
@@ -121,7 +131,14 @@ async function generateVideoWithVeo(
           continue;
         }
 
-        const updatedOp = await checkResponse.json();
+        const checkText = await checkResponse.text();
+        let updatedOp: any;
+        try {
+          updatedOp = JSON.parse(checkText);
+        } catch {
+          console.error('❌ Polling réponse non-JSON:', checkText.substring(0, 300));
+          continue;
+        }
         console.log('📊 done:', updatedOp.done);
 
         if (updatedOp.done) {
