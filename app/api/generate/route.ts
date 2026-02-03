@@ -57,7 +57,7 @@ async function generateVideoWithVeo(
       console.log(`🎬 Tentative vidéo ${attempt}/${retries} (clé #${(currentKeyIndex % apiKeys.length) + 1})`);
 
       // --- Étape 1 : Lancer l'opération predictLongRunning ---
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning`;
 
       const requestBody = {
         instances: [{
@@ -74,7 +74,7 @@ async function generateVideoWithVeo(
 
       const startResponse = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(requestBody)
       });
 
@@ -127,8 +127,8 @@ async function generateVideoWithVeo(
         await new Promise(r => setTimeout(r, 10000));
         console.log(`⏳ Polling ${poll}/${maxPolls}...`);
 
-        const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operation.name}?key=${apiKey}`;
-        const checkResponse = await fetch(checkUrl);
+        const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operation.name}`;
+        const checkResponse = await fetch(checkUrl, { headers: { 'x-goog-api-key': apiKey } });
 
         if (!checkResponse.ok) {
           console.error('❌ Erreur polling:', await checkResponse.text());

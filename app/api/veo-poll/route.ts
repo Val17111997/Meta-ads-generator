@@ -20,8 +20,8 @@ export async function GET(request: Request) {
     console.log('🔄 veo-poll: polling opération', operationName);
 
     // Poll une seule fois par appel — le frontend re-appelle en boucle
-    const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${apiKey}`;
-    const checkResponse = await fetch(checkUrl);
+    const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}`;
+    const checkResponse = await fetch(checkUrl, { headers: { 'x-goog-api-key': apiKey } });
 
     if (!checkResponse.ok) {
       const errorText = await checkResponse.text();
