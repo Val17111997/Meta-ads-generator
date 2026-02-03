@@ -119,8 +119,10 @@ async function generateVideoWithVeo(
 
       console.log('✅ Opération Veo démarrée, début polling...');
 
-      // --- Étape 2 : Polling jusqu'à done=true (max 40s pour rester dans les 60s) ---
-      const maxPolls = 4; // 4 × 10s = 40s max
+      // --- Étape 2 : Polling jusqu'à done=true
+      // On reste dans les 55s pour avoir de la marge sur les 60s Vercel
+      // Veo peut prendre 30-90s — on fait du mieux dans la contrainte
+      const maxPolls = 5; // 5 × 10s = 50s
       for (let poll = 1; poll <= maxPolls; poll++) {
         await new Promise(r => setTimeout(r, 10000));
         console.log(`⏳ Polling ${poll}/${maxPolls}...`);
@@ -134,6 +136,8 @@ async function generateVideoWithVeo(
         }
 
         const checkText = await checkResponse.text();
+        console.log('📡 Polling réponse brute:', checkText.substring(0, 500));
+
         let updatedOp: any;
         try {
           updatedOp = JSON.parse(checkText);
@@ -142,27 +146,37 @@ async function generateVideoWithVeo(
           continue;
         }
 
-        console.log('📊 done:', updatedOp.done);
+        console.log('📊 done:', updatedOp.done, '| keys:', Object.keys(updatedOp));
 
         if (updatedOp.done) {
-          const videoUri = updatedOp.response?.videos?.[0]?.uri;
+          // Essayer les deux structures possibles :
+          // 1) Gemini API: response.generateVideoResponse.generatedSamples[0].video.uri
+          // 2) Vertex AI:  response.videos[0].uri  (ou gcsUri)
+          const videoUri =
+            updatedOp.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+            updatedOp.response?.videos?.[0]?.uri ||
+            updatedOp.response?.videos?.[0]?.gcsUri;
+
           if (videoUri) {
             console.log('✅ Vidéo générée ! URI récupérée.');
             return videoUri;
           }
-          // done=true mais pas de vidéo — peut être une erreur dans response
-          const errorMsg = updatedOp.error?.message || 'URI absente';
-          console.error('❌ done=true mais pas de vidéo:', errorMsg, JSON.stringify(updatedOp));
-          throw new Error(`Veo done mais pas de vidéo: ${errorMsg}`);
+          // done=true mais pas de vidéo — log tout pour debug
+          console.error('❌ done=true mais URI introuvable. Réponse complète:', JSON.stringify(updatedOp));
+          throw new Error(`Veo done mais pas de vidéo dans la réponse`);
         }
       }
 
-      // Timeout polling — on throw pour déclencher le retry avec une autre clé
-      console.log('⏰ Timeout polling après 40s, retry...');
-      throw new Error('Timeout polling Veo');
+      // Timeout polling — on retourne l'operation.name pour que le frontend puisse reprendre le polling
+      console.log('⏰ Timeout polling après 50s. Operation:', operation.name);
+      throw new Error(`Timeout polling Veo | operation:${operation.name}`);
 
     } catch (error: any) {
       console.error(`❌ Tentative ${attempt} échouée:`, error.message);
+      // Ne pas retry si c'est un timeout polling — l'opération existe déjà, on ne relance pas
+      if (error.message.includes('Timeout polling') || error.message.includes('done mais pas de vidéo')) {
+        throw error;
+      }
       if (attempt === retries) throw error;
       await new Promise(r => setTimeout(r, 2000));
     }
@@ -449,23 +463,50 @@ export async function POST(request: Request) {
     // ============================================================
     if (contentType === 'video') {
       console.log('🎬 Démarrage génération vidéo Veo...');
-      const videoUri = await generateVideoWithVeo(prompt, format);
+      
+      try {
+        const videoUri = await generateVideoWithVeo(prompt, format);
 
-      // Mise à jour Sheet
-      row.set('Statut', 'généré');
-      row.set('URL Image', videoUri);
-      row.set('Date génération', new Date().toLocaleString('fr-FR'));
-      await row.save();
+        // Mise à jour Sheet
+        row.set('Statut', 'généré');
+        row.set('URL Image', videoUri);
+        row.set('Date génération', new Date().toLocaleString('fr-FR'));
+        await row.save();
 
-      console.log('✅ Vidéo générée et Sheet mis à jour');
+        console.log('✅ Vidéo générée et Sheet mis à jour');
 
-      return NextResponse.json({
-        success: true,
-        mediaType: 'video',
-        imageUrl: videoUri,
-        prompt,
-        remaining: pendingRows.length - 1,
-      });
+        return NextResponse.json({
+          success: true,
+          mediaType: 'video',
+          imageUrl: videoUri,
+          prompt,
+          remaining: pendingRows.length - 1,
+        });
+      } catch (videoError: any) {
+        // Si timeout polling, retourner l'operation pour que le frontend reprend le polling
+        const opMatch = videoError.message?.match(/operation:(.+)/);
+        if (opMatch) {
+          const operationName = opMatch[1];
+          console.log('⏳ Timeout inline, on retourne l\'opération pour polling frontend:', operationName);
+          
+          row.set('Statut', 'en cours vidéo');
+          row.set('URL Image', operationName); // stocke l'operation name pour reprendre
+          row.set('Date génération', new Date().toLocaleString('fr-FR'));
+          await row.save();
+
+          return NextResponse.json({
+            success: true,
+            mediaType: 'video',
+            videoOperation: operationName,
+            imageUrl: null,
+            prompt,
+            remaining: pendingRows.length - 1,
+            message: 'Vidéo en cours — polling à reprendre',
+          });
+        }
+        // Autre erreur — on re-throw
+        throw videoError;
+      }
     }
 
     // IMAGE : appel direct à Gemini (comme avant)
