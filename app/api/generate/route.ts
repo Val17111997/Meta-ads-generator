@@ -61,13 +61,13 @@ async function generateVideoWithVeo(
 
       const requestBody = {
         instances: [{
-          prompt: prompt,
-          config: {
-            aspectRatio: aspectRatio,
-            durationSeconds: 8,
-            resolution: "720p"
-          }
-        }]
+          prompt: prompt
+        }],
+        parameters: {
+          aspectRatio: aspectRatio,
+          durationSeconds: 8,
+          resolution: "720p"
+        }
       };
 
       console.log('📦 Request body:', JSON.stringify(requestBody));
