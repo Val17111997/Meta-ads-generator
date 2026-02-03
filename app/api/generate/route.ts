@@ -149,6 +149,12 @@ async function generateVideoWithVeo(
         console.log('📊 done:', updatedOp.done, '| keys:', Object.keys(updatedOp));
 
         if (updatedOp.done) {
+          // Erreur côté Veo (ex: contenu bloqué par RAI)
+          if (updatedOp.error) {
+            console.error('❌ Erreur Veo dans operation:', updatedOp.error);
+            throw new Error(`Veo erreur: ${updatedOp.error?.message || 'inconnue'}`);
+          }
+
           // Essayer les deux structures possibles :
           // 1) Gemini API: response.generateVideoResponse.generatedSamples[0].video.uri
           // 2) Vertex AI:  response.videos[0].uri  (ou gcsUri)
@@ -157,13 +163,35 @@ async function generateVideoWithVeo(
             updatedOp.response?.videos?.[0]?.uri ||
             updatedOp.response?.videos?.[0]?.gcsUri;
 
-          if (videoUri) {
-            console.log('✅ Vidéo générée ! URI récupérée.');
+          if (!videoUri) {
+            console.error('❌ done=true mais URI introuvable. Réponse complète:', JSON.stringify(updatedOp));
+            throw new Error(`Veo done mais pas de vidéo dans la réponse`);
+          }
+
+          console.log('✅ Vidéo générée ! URI:', videoUri);
+          console.log('📥 Téléchargement vidéo côté serveur (proxy auth)...');
+
+          // L'URI Veo nécessite x-goog-api-key + suivre les redirects
+          // Le frontend ne peut pas faire ça (CORS) — on proxy ici
+          try {
+            const videoRes = await fetch(videoUri, {
+              headers: { 'x-goog-api-key': apiKey },
+              redirect: 'follow'
+            });
+            if (videoRes.ok) {
+              const videoBuffer = await videoRes.arrayBuffer();
+              const base64 = Buffer.from(videoBuffer).toString('base64');
+              const mimeType = videoRes.headers.get('content-type') || 'video/mp4';
+              console.log(`✅ Vidéo proxy OK (${(videoBuffer.byteLength / 1024 / 1024).toFixed(2)} MB, ${mimeType})`);
+              return `data:${mimeType};base64,${base64}`;
+            } else {
+              console.warn(`⚠️ Proxy vidéo échoué (${videoRes.status}), retourne URI brute`);
+              return videoUri;
+            }
+          } catch (dlErr: any) {
+            console.warn('⚠️ Erreur download vidéo:', dlErr.message, '— retourne URI brute');
             return videoUri;
           }
-          // done=true mais pas de vidéo — log tout pour debug
-          console.error('❌ done=true mais URI introuvable. Réponse complète:', JSON.stringify(updatedOp));
-          throw new Error(`Veo done mais pas de vidéo dans la réponse`);
         }
       }
 

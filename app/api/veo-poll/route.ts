@@ -1,104 +1,146 @@
 import { NextResponse } from 'next/server';
-import { GoogleSpreadsheet } from 'google-spreadsheet';
-import { JWT } from 'google-auth-library';
 
-export const maxDuration = 55;
-export const dynamic = 'force-dynamic';
+export const maxDuration = 55; // Vercel: max 55s sur Pro
+
+const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+
+// Extraction robuste de l'URI vidéo — supporte les deux formats
+// Gemini API: response.generateVideoResponse.generatedSamples[0].video.uri
+// Vertex AI:  response.videos[0].gcsUri
+function extractVideoUri(op: any): string | null {
+  // Chemin 1 : Gemini API (celui qu'on utilise)
+  const geminiUri = op?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+  if (geminiUri) return geminiUri;
+
+  // Chemin 2 : Vertex AI (backup)
+  const vertexUri = op?.response?.videos?.[0]?.gcsUri;
+  if (vertexUri) return vertexUri;
+
+  return null;
+}
 
 export async function GET(request: Request) {
-  try {
-    const url = new URL(request.url);
-    const operationName = url.searchParams.get('operation');
+  const url = new URL(request.url);
+  const operationName = url.searchParams.get('operation');
 
-    if (!operationName) {
-      return NextResponse.json({ success: false, error: 'Paramètre operation manquant' }, { status: 400 });
-    }
-
-    const apiKeys = process.env.GOOGLE_API_KEY!.split(',');
-    const apiKey = apiKeys[0];
-
-    console.log('🔄 veo-poll: début polling opération', operationName);
-
-    // Poll en boucle jusqu'à done=true ou timeout 50s
-    const maxPolls = 5; // 5 × 10s = 50s
-    for (let i = 1; i <= maxPolls; i++) {
-      if (i > 1) {
-        await new Promise(r => setTimeout(r, 10000));
-      }
-
-      console.log(`🔄 veo-poll: poll ${i}/${maxPolls}...`);
-
-      const checkUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}`;
-      const checkResponse = await fetch(checkUrl, { headers: { 'x-goog-api-key': apiKey } });
-
-      if (!checkResponse.ok) {
-        const errorText = await checkResponse.text();
-        console.error('❌ Erreur polling:', errorText);
-        continue;
-      }
-
-      const checkText = await checkResponse.text();
-      console.log('📡 Réponse polling:', checkText.substring(0, 500));
-
-      let updatedOp: any;
-      try {
-        updatedOp = JSON.parse(checkText);
-      } catch {
-        console.error('❌ Réponse non-JSON');
-        continue;
-      }
-
-      console.log('📊 done:', updatedOp.done, '| keys:', Object.keys(updatedOp));
-
-      if (updatedOp.done) {
-        const videoUri =
-          updatedOp.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-          updatedOp.response?.videos?.[0]?.uri ||
-          updatedOp.response?.videos?.[0]?.gcsUri;
-
-        if (!videoUri) {
-          console.error('❌ done=true mais pas d URI. Réponse complète:', JSON.stringify(updatedOp));
-          return NextResponse.json({ success: false, error: 'Vidéo done mais URI absente', pending: false });
-        }
-
-        console.log('✅ Vidéo prête !', videoUri);
-
-        // Mise à jour du Sheet si rowIndex fourni
-        try {
-          const rowIndex = url.searchParams.get('rowIndex');
-          if (rowIndex) {
-            const serviceAccountAuth = new JWT({
-              email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-              key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-              scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-            });
-            const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID!, serviceAccountAuth);
-            await doc.loadInfo();
-            const sheet = doc.sheetsByIndex[0];
-            const rows = await sheet.getRows();
-            const row = rows[parseInt(rowIndex)];
-            if (row) {
-              row.set('Statut', 'généré');
-              row.set('URL Image', videoUri);
-              row.set('Date génération', new Date().toLocaleString('fr-FR'));
-              await row.save();
-              console.log('✅ Sheet mis à jour');
-            }
-          }
-        } catch (sheetErr) {
-          console.error('⚠️ Erreur mise à jour Sheet (non-bloquant):', sheetErr);
-        }
-
-        return NextResponse.json({ success: true, done: true, videoUri });
-      }
-    }
-
-    // Timeout après 50s
-    console.log('⏰ veo-poll timeout après 50s. Opération:', operationName);
-    return NextResponse.json({ success: false, pending: true, done: false, operation: operationName });
-
-  } catch (error: any) {
-    console.error('❌ Erreur veo-poll:', error.message);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  if (!operationName) {
+    return NextResponse.json({ error: 'Paramètre operation manquant' }, { status: 400 });
   }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: 'GEMINI_API_KEY non configurée' }, { status: 500 });
+  }
+
+  const pollUrl = `${BASE_URL}/${operationName}`;
+  console.log('🎬 veo-poll: polling', pollUrl);
+
+  // Boucle interne: 5 tentatives × 10s = 50s max (dans maxDuration: 55)
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    if (attempt > 1) {
+      console.log(`⏳ veo-poll: attente 10s avant tentative ${attempt}/5`);
+      await new Promise(r => setTimeout(r, 10000));
+    }
+
+    try {
+      const res = await fetch(pollUrl, {
+        headers: { 'x-goog-api-key': apiKey }
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error(`❌ veo-poll: HTTP ${res.status}`, errText);
+        // 404 = operation inconnue → pas la peine de réessayer
+        if (res.status === 404) {
+          return NextResponse.json({ error: `Operation introuvable: ${errText}` }, { status: 404 });
+        }
+        continue; // réessayer sur les autres erreurs
+      }
+
+      const op = await res.json();
+      console.log('📡 veo-poll réponse brute:', JSON.stringify(op, null, 2));
+
+      if (op.done === true) {
+        // Check erreur côté Veo
+        if (op.error) {
+          console.error('❌ veo-poll: erreur dans operation:', op.error);
+          return NextResponse.json({
+            success: false,
+            done: true,
+            error: op.error?.message || 'Erreur inconnue Veo'
+          });
+        }
+
+        const videoUri = extractVideoUri(op);
+        if (!videoUri) {
+          console.error('❌ veo-poll: done=true mais pas d\'URI vidéo. Réponse:', JSON.stringify(op));
+          return NextResponse.json({
+            success: false,
+            done: true,
+            error: 'Vidéo générée mais URI introuvable',
+            rawResponse: op
+          });
+        }
+
+        console.log('✅ veo-poll: vidéo prête!', videoUri);
+
+        // La vidéo URI nécessite x-goog-api-key pour être téléchargée
+        // On la télécharge ici côté serveur et on retourne en base64
+        try {
+          console.log('📥 veo-poll: téléchargement vidéo depuis', videoUri);
+          const videoRes = await fetch(videoUri, {
+            headers: { 'x-goog-api-key': apiKey },
+            redirect: 'follow' // IMPORTANT: suivre les redirects
+          });
+
+          if (videoRes.ok) {
+            const videoBuffer = await videoRes.arrayBuffer();
+            const base64 = Buffer.from(videoBuffer).toString('base64');
+            const mimeType = videoRes.headers.get('content-type') || 'video/mp4';
+            const dataUri = `data:${mimeType};base64,${base64}`;
+            console.log(`✅ veo-poll: vidéo téléchargée (${(videoBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)`);
+
+            return NextResponse.json({
+              success: true,
+              done: true,
+              videoUri: dataUri,
+              originalUri: videoUri
+            });
+          } else {
+            console.warn(`⚠️ veo-poll: téléchargement vidéo échoué (${videoRes.status}), retourne URI brute`);
+            // Fallback: retourner l'URI brute — le frontend devra la proxier
+            return NextResponse.json({
+              success: true,
+              done: true,
+              videoUri: videoUri,
+              requiresAuth: true
+            });
+          }
+        } catch (downloadErr: any) {
+          console.warn('⚠️ veo-poll: erreur download vidéo:', downloadErr.message);
+          return NextResponse.json({
+            success: true,
+            done: true,
+            videoUri: videoUri,
+            requiresAuth: true
+          });
+        }
+
+      } else {
+        console.log(`⏳ veo-poll: tentative ${attempt}/5 — pas encore done`);
+        // Continue la boucle
+      }
+
+    } catch (fetchErr: any) {
+      console.error(`❌ veo-poll: erreur fetch tentative ${attempt}:`, fetchErr.message);
+    }
+  }
+
+  // Après 5 tentatives sans done=true → retourner pending
+  console.log('⏳ veo-poll: timeout après 5 tentatives, vidéo toujours en cours');
+  return NextResponse.json({
+    pending: true,
+    operation: operationName,
+    message: 'Vidéo toujours en cours après 50s — le frontend va re-poller'
+  });
 }
