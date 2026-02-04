@@ -1,627 +1,157 @@
 import { NextResponse } from 'next/server';
-import { GoogleSpreadsheet } from 'google-spreadsheet';
-import { JWT } from 'google-auth-library';
 
-export const maxDuration = 60;
+/**
+ * GET /api/veo-poll?operation=models/veo-3.1-generate-preview/operations/XXXX
+ * 
+ * Poll une opération Veo long-running.
+ * Retourne :
+ *   { success: true, done: true, videoUri: "..." }   — vidéo prête
+ *   { success: true, pending: true }                  — encore en cours
+ *   { success: false, error: "..." }                  — erreur définitive
+ */
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-async function getSheetData(retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const serviceAccountAuth = new JWT({
-        email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-      });
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const operationName = url.searchParams.get('operation');
 
-      const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID!, serviceAccountAuth);
-      
-      await doc.loadInfo();
-      const sheet = doc.sheetsByIndex[0];
-      const rows = await sheet.getRows();
-      
-      return { sheet, rows };
-    } catch (error: any) {
-      console.error(`Erreur Google Sheets (tentative ${attempt}/${retries}):`, error.message);
-      
-      if (error.message.includes('503') && attempt < retries) {
-        const waitTime = attempt * 2000;
-        console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-        continue;
-      }
-      
-      throw new Error(`Erreur d'accès au Google Sheet: ${error.message}`);
-    }
+  if (!operationName) {
+    return NextResponse.json({ success: false, error: 'Paramètre "operation" manquant' }, { status: 400 });
   }
-  
-  throw new Error('Échec après plusieurs tentatives');
-}
 
-// ============================================================
-// GÉNÉRATION VIDÉO avec Veo — predictLongRunning + polling
-// ============================================================
-// Timing budget (Vercel free = 60s max) :
-//   ~5s  : démarrage opération + overhead
-//   40s  : polling inline (4 × 10s)
-//   15s  : sheets save + proxy vidéo (si done)
-// Si pas done après 40s → on throw avec operation.name
-// → le frontend reprend via /api/veo-poll
-// ============================================================
-async function generateVideoWithVeo(
-  prompt: string,
-  format: string = '9:16',
-  referenceImages: string[] = [],
-  retries = 3
-): Promise<string | null> {
-  const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
-  let currentKeyIndex = 0;
+  const apiKeys = (process.env.GOOGLE_API_KEY || '').split(',');
+  const apiKey = apiKeys[0]?.trim();
 
-  const aspectRatio = (format === '16:9' || format === '9:16') ? format : '9:16';
+  if (!apiKey) {
+    return NextResponse.json({ success: false, error: 'GOOGLE_API_KEY non configurée' }, { status: 500 });
+  }
+
   const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  // ──────────────────────────────────────────────────────
+  // POINT CLEF : l'URL de polling doit être exactement
+  //   ${BASE_URL}/${operation_name}
+  // avec ?key= comme query param (plus fiable que le header
+  // pour les opérations long-running sur Gemini API).
+  //
+  // operation_name ressemble à :
+  //   "models/veo-3.1-generate-preview/operations/abc123"
+  // ──────────────────────────────────────────────────────
+  const pollUrl = `${BASE_URL}/${operationName}?key=${apiKey}`;
+
+  console.log('🔍 Polling URL:', pollUrl.replace(apiKey, 'KEY_REDACTED'));
+
+  try {
+    const response = await fetch(pollUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        // On garde aussi le header — belt & suspenders
+        'x-goog-api-key': apiKey,
+      },
+      // Crucial : pas de cache
+      cache: 'no-store',
+    });
+
+    console.log('📊 Poll status HTTP:', response.status);
+
+    if (response.status === 429) {
+      // Rate limit — on retourne "pending" pour qu'il réessaie
+      console.log('⚠️ Rate limit sur le polling, retry...');
+      return NextResponse.json({ success: true, pending: true });
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Erreur polling HTTP', response.status, ':', errorText.substring(0, 300));
+      
+      // Si c'est un 404, l'opération n'existe plus (expirée après 2 jours)
+      if (response.status === 404) {
+        return NextResponse.json({ success: false, error: 'Opération expirée ou introuvable (404). Regénère la vidéo.' });
+      }
+
+      return NextResponse.json({ success: false, error: `Polling échoué: HTTP ${response.status}` });
+    }
+
+    const data = await response.json();
+    console.log('📦 Réponse polling (keys):', Object.keys(data));
+    console.log('📦 done:', data.done);
+
+    // ── Pas encore terminé ──
+    if (!data.done) {
+      console.log('⏳ Opération encore en cours...');
+      return NextResponse.json({ success: true, pending: true });
+    }
+
+    // ── Opération terminée avec erreur côté Veo ──
+    if (data.error) {
+      console.error('❌ Erreur dans l\'opération Veo:', JSON.stringify(data.error));
+      return NextResponse.json({
+        success: false,
+        error: data.error?.message || 'Erreur Veo inconnue dans l\'opération',
+      });
+    }
+
+    // ── done: true — extraire l'URI de la vidéo ──
+    // Structure officielle (docs Google REST) :
+    //   response.generateVideoResponse.generatedSamples[0].video.uri
+    const videoUri =
+      data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
+      // Fallbacks au cas où Google change la structure :
+      data.response?.generatedVideos?.[0]?.video?.uri ||
+      data.response?.videos?.[0]?.uri;
+
+    if (!videoUri) {
+      console.error('❌ done=true mais URI introuvable. Réponse complète:', JSON.stringify(data).substring(0, 800));
+      return NextResponse.json({
+        success: false,
+        error: 'Vidéo générée mais URI introuvable dans la réponse. Vérifie les logs.',
+      });
+    }
+
+    console.log('✅ Vidéo prête ! URI:', videoUri.substring(0, 80) + '...');
+
+    // ── Proxy : télécharger la vidéo côté serveur ──
+    // L'URI Veo nécessite x-goog-api-key et des redirects.
+    // Le browser ne peut pas ça directement (CORS).
     try {
-      const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
-      console.log(`🎬 Tentative vidéo ${attempt}/${retries} (clé #${(currentKeyIndex % apiKeys.length) + 1})`);
-
-      // ── Étape 1 : Lancer predictLongRunning ──
-      const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
-      
-      // Construire le request body selon la documentation officielle REST
-      // referenceImages doit être dans "parameters", pas dans "instances"
-      // Format: { image: { inlineData: { mimeType, data } }, referenceType: "asset" }
-      const requestBody: any = {
-        instances: [{ prompt: prompt }],
-        parameters: {
-          aspectRatio: aspectRatio,
-          durationSeconds: 8,
-          resolution: '720p'
-        }
-      };
-
-      // Ajoute les images produit comme references si disponibles
-      // IMPORTANT: referenceImages va dans "parameters", pas dans "instances"
-      if (referenceImages.length > 0) {
-        const refImages = referenceImages.slice(0, 3).map(img => {
-          // Extraire le mimeType depuis le préfixe data:
-          const mimeMatch = img.match(/^data:(image\/[a-z]+);base64,/);
-          const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-          // Extraire les données base64 (sans le préfixe)
-          const base64Data = img.split(',')[1] || img;
-          
-          // Format officiel REST API: inlineData au lieu de bytesBase64Encoded
-          return {
-            image: {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Data
-              }
-            },
-            referenceType: 'asset'
-          };
-        });
-        
-        requestBody.parameters.referenceImages = refImages;
-        console.log(`🖼️ ${refImages.length} image(s) produit ajoutée(s) comme référence dans parameters`);
-      }
-
-      console.log('📦 Request body structure:', JSON.stringify({
-        instances: [{ prompt: prompt.substring(0, 50) + '...' }],
-        parameters: {
-          ...requestBody.parameters,
-          referenceImages: requestBody.parameters.referenceImages 
-            ? `[${requestBody.parameters.referenceImages.length} images]` 
-            : undefined
-        }
-      }));
-
-      const startResponse = await fetch(startUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
-        },
-        body: JSON.stringify(requestBody)
+      const videoRes = await fetch(videoUri, {
+        headers: { 'x-goog-api-key': apiKey },
+        redirect: 'follow',
       });
 
-      console.log('📊 Status démarrage:', startResponse.status);
-
-      if (startResponse.status === 429) {
-        console.log('⚠️ Rate limit (429), on change de clé...');
-        currentKeyIndex++;
-        await new Promise(r => setTimeout(r, 3000));
-        continue;
-      }
-
-      if (startResponse.status === 503) {
-        console.log('⚠️ Serveur surchargé (503), retry...');
-        await new Promise(r => setTimeout(r, attempt * 3000));
-        continue;
-      }
-
-      if (!startResponse.ok) {
-        const errorText = await startResponse.text();
-        console.error('❌ Erreur démarrage Veo:', errorText.substring(0, 500));
-        throw new Error(`Veo HTTP ${startResponse.status}: ${errorText.substring(0, 200)}`);
-      }
-
-      const startText = await startResponse.text();
-      console.log('📡 Réponse brute start:', startText.substring(0, 200));
-
-      let operation: any;
-      try {
-        operation = JSON.parse(startText.trim());
-      } catch {
-        console.error('❌ Réponse non-JSON de Veo:', startText.substring(0, 500));
-        throw new Error(`Veo texte non-JSON: ${startText.substring(0, 150)}`);
-      }
-
-      if (!operation.name) {
-        console.error('❌ Pas de operation.name:', JSON.stringify(operation));
-        throw new Error('Pas de operation name retourné par Veo');
-      }
-
-      console.log('✅ Opération Veo démarrée:', operation.name);
-
-      // ── Étape 2 : Polling inline (4 × 10s = 40s max) ──
-      const maxPolls = 4; // 4 × 10s = 40s, garde ~20s pour sheets + proxy
-      for (let poll = 1; poll <= maxPolls; poll++) {
-        await new Promise(r => setTimeout(r, 10000));
-        console.log(`⏳ Polling ${poll}/${maxPolls}...`);
-
-        const checkUrl = `${BASE_URL}/${operation.name}?key=${apiKey}`;
-        console.log('🔍 Poll URL:', checkUrl.replace(apiKey, 'KEY_REDACTED'));
-
-        const checkResponse = await fetch(checkUrl, {
-          method: 'GET',
-          headers: { 'x-goog-api-key': apiKey },
-          cache: 'no-store',
-        });
-
-        console.log('📊 Poll HTTP status:', checkResponse.status);
-
-        if (checkResponse.status === 429) {
-          console.log('⚠️ Rate limit sur le poll, on continue...');
-          continue;
-        }
-
-        if (!checkResponse.ok) {
-          const errText = await checkResponse.text();
-          console.error('❌ Erreur polling:', errText.substring(0, 300));
-          continue;
-        }
-
-        const checkText = await checkResponse.text();
-        console.log('📡 Polling réponse brute:', checkText.substring(0, 500));
-
-        let updatedOp: any;
-        try {
-          updatedOp = JSON.parse(checkText.trim());
-        } catch {
-          console.error('❌ Polling réponse non-JSON:', checkText.substring(0, 300));
-          continue;
-        }
-
-        console.log('📊 done:', updatedOp.done, '| keys:', Object.keys(updatedOp));
-
-        if (updatedOp.done) {
-          if (updatedOp.error) {
-            console.error('❌ Erreur Veo dans operation:', JSON.stringify(updatedOp.error));
-            throw new Error(`Veo erreur: ${updatedOp.error?.message || 'inconnue'}`);
-          }
-
-          const videoUri =
-            updatedOp.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-            updatedOp.response?.generatedVideos?.[0]?.video?.uri ||
-            updatedOp.response?.videos?.[0]?.uri;
-
-          if (!videoUri) {
-            console.error('❌ done=true mais URI introuvable. Réponse:', JSON.stringify(updatedOp).substring(0, 800));
-            throw new Error(`Veo done mais pas de vidéo dans la réponse`);
-          }
-
-          console.log('✅ Vidéo générée ! URI:', videoUri.substring(0, 80) + '...');
-
-          // Proxy : télécharger la vidéo côté serveur
-          try {
-            const videoRes = await fetch(videoUri, {
-              headers: { 'x-goog-api-key': apiKey },
-              redirect: 'follow'
-            });
-            if (videoRes.ok) {
-              const videoBuffer = await videoRes.arrayBuffer();
-              const base64 = Buffer.from(videoBuffer).toString('base64');
-              const mimeType = videoRes.headers.get('content-type') || 'video/mp4';
-              console.log(`✅ Vidéo proxy OK (${(videoBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)`);
-              return `data:${mimeType};base64,${base64}`;
-            } else {
-              console.warn(`⚠️ Proxy vidéo échoué (${videoRes.status}), retourne URI brute`);
-              return videoUri;
-            }
-          } catch (dlErr: any) {
-            console.warn('⚠️ Erreur download vidéo:', dlErr.message);
-            return videoUri;
-          }
-        }
-      }
-
-      // ── Timeout polling après 40s ──
-      // L'opération existe toujours côté Google — on ne la relance pas.
-      // On retourne operation.name pour que le frontend reprenne via /api/veo-poll
-      console.log('⏰ Timeout polling après 40s. Operation:', operation.name);
-      throw new Error(`Timeout polling Veo | operation:${operation.name}`);
-
-    } catch (error: any) {
-      console.error(`❌ Tentative ${attempt} échouée:`, error.message);
-      // Ne pas retry si c'est un timeout polling — l'opération existe déjà
-      if (error.message.includes('Timeout polling') || error.message.includes('done mais pas de vidéo')) {
-        throw error;
-      }
-      if (attempt === retries) throw error;
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  }
-
-  throw new Error('Échec génération vidéo après toutes les tentatives');
-}
-
-// ============================================================
-// GÉNÉRATION IMAGE avec Gemini
-// ============================================================
-async function generateWithProductImage(
-  prompt: string, 
-  productImagesBase64: string[], 
-  brandAssetsData: { url: string; type: 'logo' | 'palette' | 'style' }[] = [],
-  shouldIncludeLogo: boolean = false,
-  shouldIncludeText: boolean = true,
-  format: string = '1:1', 
-  retries = 5
-) {
-  try {
-    console.log('🎨 Génération avec Nano Banana Pro');
-    console.log('📸 Prompt:', prompt);
-    console.log('📐 Format:', format);
-    console.log('🖼️ Nombre d\'images produit:', productImagesBase64.length);
-    console.log('🎨 Nombre d\'assets de marque:', brandAssetsData.length);
-    console.log('🏷️ Inclusion logo:', shouldIncludeLogo);
-    console.log('📝 Inclusion texte:', shouldIncludeText);
-    
-    const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
-    let currentKeyIndex = 0;
-    
-    const productParts = productImagesBase64.map(imgBase64 => {
-      const base64Data = imgBase64.split(',')[1] || imgBase64;
-      return {
-        inlineData: { 
-          mimeType: 'image/png',
-          data: base64Data
-        }
-      };
-    });
-
-    const brandParts = brandAssetsData
-      .filter(asset => shouldIncludeLogo ? true : asset.type !== 'logo')
-      .map(asset => {
-        const base64Data = asset.url.split(',')[1] || asset.url;
-        return {
-          inlineData: { 
-            mimeType: 'image/png',
-            data: base64Data
-          }
-        };
-      });
-
-    let textInstructions = '';
-    if (shouldIncludeText) {
-      textInstructions = '\n\nTEXT OVERLAY:\n- Add compelling French marketing text overlay on the image\n- Include catchy headlines, product benefits, or promotional messages\n- Use modern, readable typography\n- Ensure text is clearly visible and well-positioned';
-    } else {
-      textInstructions = '\n\nNO TEXT RULE:\n- DO NOT add ANY text, words, letters, numbers, or characters on the image\n- Pure visual composition without any textual elements\n- Focus solely on product photography and visual storytelling';
-    }
-    
-    let brandInstructions = '';
-    const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
-    const hasPalette = brandAssetsData.some(a => a.type === 'palette');
-    const hasStyle = brandAssetsData.some(a => a.type === 'style');
-
-    if (hasLogo || hasPalette || hasStyle) {
-      brandInstructions = '\n\nBRAND CONSISTENCY GUIDELINES:';
-      if (hasLogo) brandInstructions += '\n- Logo provided: Incorporate the brand logo naturally and prominently in the composition as requested in the prompt.';
-      if (hasPalette) brandInstructions += '\n- Color palette reference provided: Use these EXACT colors consistently for backgrounds, text overlays, decorative elements, and overall color scheme.';
-      if (hasStyle) brandInstructions += '\n- Visual style references provided: Match the aesthetic feel, photography style, composition approach, lighting, and overall brand atmosphere.';
-      brandInstructions += '\n- Prioritize color accuracy and visual style consistency.';
-    }
-    
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        console.log(`🔄 Tentative ${attempt}/${retries}...`);
-        
-        const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
-        console.log(`🔑 Utilisation clé API #${(currentKeyIndex % apiKeys.length) + 1}`);
-        
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  ...productParts,
-                  ...brandParts,
-                  { 
-                    text: `Create a professional Meta ad image. ${prompt}. 
-
-CRITICAL PRODUCT RULES:
-- The product(s) in the provided image(s) MUST be clearly visible and recognizable in the scene
-- NEVER deform, distort, or modify the product's shape, proportions, labels, or branding
-- Keep the product EXACTLY as shown in the reference images unless the prompt explicitly requests "illustration style", "drawing", "schematic", "cartoon", or similar artistic interpretation
-- The product packaging, bottles, labels and logo must remain accurate and readable
-- Only the background, lighting, and scene composition should be creative - the product itself stays authentic
-${textInstructions}
-${brandInstructions}
-
-Professional marketing photography. High quality. Eye-catching for social media. 
-ALL TEXT IN THE IMAGE MUST BE IN FRENCH. Use French language for all labels, titles, and descriptions in the image.`
-                  }
-                ]
-              }],
-              generationConfig: {
-                imageConfig: { 
-                  aspectRatio: format,
-                  imageSize: '2K'
-                }
-              }
-            }),
-          }
-        );
-
-        if (response.status === 503) {
-          console.log('⚠️ Serveur surchargé (503)...');
-          if (attempt < retries) {
-            const waitTime = attempt * 3000;
-            console.log(`⏳ Attente ${waitTime/1000}s avant retry...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-          throw new Error('Serveurs Google surchargés. Réessaye dans quelques minutes.');
-        }
-
-        if (response.status === 429) {
-          console.log('⚠️ Limite de débit atteinte (429)...');
-          currentKeyIndex++;
-          if (attempt < retries) {
-            const waitTime = apiKeys.length > 1 ? 2000 : 10000 + (attempt * 5000);
-            console.log(`⏳ Attente ${waitTime/1000}s avant retry avec ${apiKeys.length > 1 ? 'clé suivante' : 'même clé'}...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-          throw new Error('Limite de requêtes atteinte. Attends quelques minutes avant de réessayer.');
-        }
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Erreur API:', errorText);
-          throw new Error(`Erreur API: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log('📦 Réponse reçue');
-        
-        if (!data.candidates || data.candidates.length === 0) {
-          throw new Error('Aucune image générée');
-        }
-        
-        const candidate = data.candidates[0];
-        const parts = candidate.content?.parts || [];
-        const imagePart = parts.find((part: any) => part.inlineData);
-        
-        if (!imagePart?.inlineData?.data) {
-          throw new Error('Pas de données image dans la réponse');
-        }
-        
-        const imageUrl = `data:image/png;base64,${imagePart.inlineData.data}`;
-        console.log('✅ Image générée avec succès');
-        
-        return imageUrl;
-        
-      } catch (error: any) {
-        if (attempt === retries) {
-          throw error;
-        }
-        console.log(`❌ Tentative ${attempt} échouée, retry...`);
-      }
-    }
-    
-    throw new Error('Échec après plusieurs tentatives');
-    
-  } catch (error: any) {
-    console.error('❌ Erreur:', error.message);
-    throw error;
-  }
-}
-
-// ============================================================
-// HANDLER POST principal
-// ============================================================
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { productGroups = {}, brandAssets = [] } = body;
-    
-    if (!process.env.GOOGLE_API_KEY) {
-      return NextResponse.json({ 
-        success: false,
-        error: 'GOOGLE_API_KEY non configurée' 
-      }, { status: 500 });
-    }
-
-    const totalImages = Object.values(productGroups).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
-    if (totalImages === 0) {
-      return NextResponse.json({ 
-        success: false,
-        error: 'Aucune image produit. Crée un groupe et upload des images !' 
-      }, { status: 400 });
-    }
-    
-    const { rows } = await getSheetData();
-    
-    const pendingRows = rows.filter(row => {
-      const status = row.get('Statut') || '';
-      const s = status.toLowerCase();
-      return s !== 'généré' && s !== 'en cours vidéo';
-    });
-    
-    console.log(`⏳ Prompts en attente: ${pendingRows.length}`);
-    
-    if (pendingRows.length === 0) {
-      return NextResponse.json({ 
-        success: false,
-        message: 'Aucun prompt en attente !' 
-      });
-    }
-    
-    const row = pendingRows[0];
-    const prompt = row.get('Prompt');
-    let format = (row.get('Format') || '1:1').trim();
-    const productName = (row.get('Produit') || '').trim();
-    const contentType = (row.get('Type') || 'photo').trim().toLowerCase();
-    
-    const avecTexte = (row.get('Avec Texte') || 'oui').trim().toLowerCase();
-    const avecLogo = (row.get('Avec Logo') || 'non').trim().toLowerCase();
-    
-    const shouldIncludeText = avecTexte === 'oui';
-    const shouldIncludeLogo = avecLogo === 'oui';
-    
-    console.log(`📝 Options: Type=${contentType}, Texte=${shouldIncludeText}, Logo=${shouldIncludeLogo}`);
-    
-    let selectedImages: string[] = [];
-    
-    if (productName && productGroups[productName]) {
-      selectedImages = productGroups[productName].map((img: any) => img.url);
-      console.log(`📂 Groupe sélectionné: "${productName}" (${selectedImages.length} images)`);
-    } else if (productName && !productGroups[productName]) {
-      return NextResponse.json({ 
-        success: false,
-        message: `Groupe "${productName}" introuvable. Groupes disponibles: ${Object.keys(productGroups).join(', ')}` 
-      });
-    } else {
-      selectedImages = Object.values(productGroups)
-        .flat()
-        .map((img: any) => img.url);
-      console.log(`📂 Aucun groupe spécifié, utilisation de toutes les images (${selectedImages.length})`);
-    }
-    
-    if (selectedImages.length === 0) {
-      return NextResponse.json({ 
-        success: false,
-        message: 'Aucune image disponible pour ce produit' 
-      });
-    }
-    
-    const validFormats = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
-    format = format.replace(/^0+(\d)/, '$1');
-    
-    if (!validFormats.includes(format)) {
-      console.log(`⚠️ Format invalide "${format}", utilisation de 1:1 par défaut`);
-      format = '1:1';
-    }
-    
-    if (!prompt?.trim()) {
-      return NextResponse.json({ 
-        success: false,
-        message: 'Prompt vide' 
-      });
-    }
-    
-    console.log('🚀 Génération:', prompt);
-    console.log('📐 Format demandé:', format);
-    console.log('🎬 Type de contenu:', contentType);
-    
-    // ============================================================
-    // VIDEO : génération + polling inline (40s) puis fallback frontend
-    // ============================================================
-    if (contentType === 'video') {
-      console.log('🎬 Démarrage génération vidéo Veo...');
-      
-      try {
-        const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
-
-        row.set('Statut', 'généré');
-        row.set('URL Image', videoUri);
-        row.set('Date génération', new Date().toLocaleString('fr-FR'));
-        await row.save();
-
-        console.log('✅ Vidéo générée et Sheet mis à jour');
+      if (videoRes.ok) {
+        const videoBuffer = await videoRes.arrayBuffer();
+        const base64 = Buffer.from(videoBuffer).toString('base64');
+        const mimeType = videoRes.headers.get('content-type') || 'video/mp4';
+        const sizeMB = (videoBuffer.byteLength / 1024 / 1024).toFixed(2);
+        console.log(`✅ Vidéo proxy OK (${sizeMB} MB, ${mimeType})`);
 
         return NextResponse.json({
           success: true,
-          mediaType: 'video',
-          imageUrl: videoUri,
-          prompt,
-          remaining: pendingRows.length - 1,
+          done: true,
+          videoUri: `data:${mimeType};base64,${base64}`,
         });
-      } catch (videoError: any) {
-        // Si timeout polling → retourner operation.name pour polling frontend
-        const opMatch = videoError.message?.match(/operation:(.+)/);
-        if (opMatch) {
-          const operationName = opMatch[1];
-          console.log('⏳ Timeout inline, retourne opération pour polling frontend:', operationName);
-          
-          row.set('Statut', 'en cours vidéo');
-          row.set('URL Image', operationName);
-          row.set('Date génération', new Date().toLocaleString('fr-FR'));
-          await row.save();
-
-          return NextResponse.json({
-            success: true,
-            mediaType: 'video',
-            videoOperation: operationName,
-            imageUrl: null,
-            prompt,
-            remaining: pendingRows.length - 1,
-            message: 'Vidéo en cours — polling à reprendre',
-          });
-        }
-        throw videoError;
+      } else {
+        console.warn(`⚠️ Proxy vidéo échoué (${videoRes.status}) — retourne l'URI brute`);
+        return NextResponse.json({
+          success: true,
+          done: true,
+          videoUri: videoUri, // Le frontend devra gérer cette URL
+        });
       }
+    } catch (dlErr: any) {
+      console.warn('⚠️ Erreur download vidéo:', dlErr.message, '— retourne URI brute');
+      return NextResponse.json({
+        success: true,
+        done: true,
+        videoUri: videoUri,
+      });
     }
 
-    // ============================================================
-    // IMAGE : appel direct à Gemini
-    // ============================================================
-    let mediaUrl: string | null = null;
-    mediaUrl = await generateWithProductImage(
-      prompt, 
-      selectedImages, 
-      brandAssets, 
-      shouldIncludeLogo,
-      shouldIncludeText, 
-      format
-    );
-    
-    row.set('Statut', 'généré');
-    row.set('URL Image', 'Téléchargée localement');
-    row.set('Date génération', new Date().toLocaleString('fr-FR'));
-    await row.save();
-    
-    console.log('✅ Terminé');
-    
-    return NextResponse.json({ 
-      success: true, 
-      imageUrl: mediaUrl,
-      mediaType: 'image',
-      prompt,
-      remaining: pendingRows.length - 1,
-    });
-    
   } catch (error: any) {
-    console.error('❌ Erreur:', error);
-    return NextResponse.json({ 
-      success: false,
-      error: error.message
-    }, { status: 500 });
+    console.error('❌ Erreur fetch polling:', error.message);
+    return NextResponse.json({ success: false, error: `Erreur réseau polling: ${error.message}` });
   }
 }
