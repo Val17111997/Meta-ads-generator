@@ -71,8 +71,9 @@ async function generateVideoWithVeo(
       // ── Étape 1 : Lancer predictLongRunning ──
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
       
-      // Format REST - essai avec referenceImages dans INSTANCES (format Vertex AI)
-      // au lieu de parameters (format qui ne fonctionne pas)
+      // Format REST - logique selon le nombre d'images:
+      // - 1 image → first frame (image-to-video) : produit intact, vidéo animée à partir de l'image
+      // - 2-3 images → referenceImages : guide le style/contenu mais peut déformer
       const requestBody: any = {
         instances: [{ prompt: prompt }],
         parameters: {
@@ -81,13 +82,26 @@ async function generateVideoWithVeo(
         }
       };
 
-      // Ajouter les images de référence dans instances[0] (format Vertex AI)
-      if (referenceImages.length > 0) {
+      if (referenceImages.length === 1) {
+        // === 1 IMAGE : First Frame (image-to-video) ===
+        // La vidéo démarre avec cette image exacte et l'anime
+        const img = referenceImages[0];
+        const mimeMatch = img.match(/^data:(image\/[a-z]+);base64,/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+        const base64Data = img.split(',')[1] || img;
+        
+        requestBody.instances[0].image = {
+          bytesBase64Encoded: base64Data,
+          mimeType: mimeType
+        };
+        console.log(`🖼️ 1 image → mode FIRST FRAME (image-to-video)`);
+        
+      } else if (referenceImages.length > 1) {
+        // === 2-3 IMAGES : Reference Images ===
+        // Guide le style/contenu mais peut modifier l'apparence
         const refImages = referenceImages.slice(0, 3).map(img => {
-          // Extraire le mimeType depuis le préfixe data:
           const mimeMatch = img.match(/^data:(image\/[a-z]+);base64,/);
           const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-          // Extraire les données base64 (sans le préfixe data:xxx;base64,)
           const base64Data = img.split(',')[1] || img;
           
           return {
@@ -99,14 +113,14 @@ async function generateVideoWithVeo(
           };
         });
         
-        // Mettre referenceImages dans instances[0], pas dans parameters
         requestBody.instances[0].referenceImages = refImages;
-        console.log(`🖼️ ${refImages.length} image(s) de référence ajoutée(s) dans instances`);
+        console.log(`🖼️ ${refImages.length} images → mode REFERENCE IMAGES`);
       }
 
       console.log('📦 Request body structure:', JSON.stringify({
         instances: [{ 
           prompt: prompt.substring(0, 50) + '...',
+          image: requestBody.instances[0].image ? '[first frame]' : undefined,
           referenceImages: requestBody.instances[0].referenceImages 
             ? `[${requestBody.instances[0].referenceImages.length} images]` 
             : undefined
