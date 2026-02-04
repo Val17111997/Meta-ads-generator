@@ -67,18 +67,10 @@ async function generateVideoWithVeo(
 
       // ── Étape 1 : Lancer predictLongRunning ──
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
-      // Prépare les referenceImages pour Veo (max 3, base64 sans le préfixe data:)
-      const refImages = referenceImages.slice(0, 3).map(img => {
-        const mimeMatch = img.match(/^data:(image\/[a-z]+);base64,/);
-        const mimeType = mimeMatch ? mimeMatch[1] : 'image/webp';
-        return {
-          image: {
-            bytesBase64Encoded: img.split(',')[1] || img,
-            mimeType: mimeType
-          },
-          referenceType: 'asset'
-        };
-      });
+      
+      // Construire le request body selon la documentation officielle REST
+      // referenceImages doit être dans "parameters", pas dans "instances"
+      // Format: { image: { inlineData: { mimeType, data } }, referenceType: "asset" }
       const requestBody: any = {
         instances: [{ prompt: prompt }],
         parameters: {
@@ -89,12 +81,40 @@ async function generateVideoWithVeo(
       };
 
       // Ajoute les images produit comme references si disponibles
-      if (refImages.length > 0) {
-        requestBody.instances[0].referenceImages = refImages;
-        console.log(`🖼️ ${refImages.length} image(s) produit ajoutée(s) comme référence`);
+      // IMPORTANT: referenceImages va dans "parameters", pas dans "instances"
+      if (referenceImages.length > 0) {
+        const refImages = referenceImages.slice(0, 3).map(img => {
+          // Extraire le mimeType depuis le préfixe data:
+          const mimeMatch = img.match(/^data:(image\/[a-z]+);base64,/);
+          const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+          // Extraire les données base64 (sans le préfixe)
+          const base64Data = img.split(',')[1] || img;
+          
+          // Format officiel REST API: inlineData au lieu de bytesBase64Encoded
+          return {
+            image: {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Data
+              }
+            },
+            referenceType: 'asset'
+          };
+        });
+        
+        requestBody.parameters.referenceImages = refImages;
+        console.log(`🖼️ ${refImages.length} image(s) produit ajoutée(s) comme référence dans parameters`);
       }
 
-      console.log('📦 Request body:', JSON.stringify(requestBody));
+      console.log('📦 Request body structure:', JSON.stringify({
+        instances: [{ prompt: prompt.substring(0, 50) + '...' }],
+        parameters: {
+          ...requestBody.parameters,
+          referenceImages: requestBody.parameters.referenceImages 
+            ? `[${requestBody.parameters.referenceImages.length} images]` 
+            : undefined
+        }
+      }));
 
       const startResponse = await fetch(startUrl, {
         method: 'POST',
@@ -122,7 +142,7 @@ async function generateVideoWithVeo(
 
       if (!startResponse.ok) {
         const errorText = await startResponse.text();
-        console.error('❌ Erreur démarrage Veo:', errorText.substring(0, 300));
+        console.error('❌ Erreur démarrage Veo:', errorText.substring(0, 500));
         throw new Error(`Veo HTTP ${startResponse.status}: ${errorText.substring(0, 200)}`);
       }
 
