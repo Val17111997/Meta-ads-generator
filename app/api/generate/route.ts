@@ -71,18 +71,17 @@ async function generateVideoWithVeo(
       // ── Étape 1 : Lancer predictLongRunning ──
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
       
-      // Format REST officiel selon la documentation Google:
-      // instances: [{ prompt }]
-      // parameters: { aspectRatio, referenceImages: [{ image: { inlineData }, referenceType }] }
+      // Format REST - essai avec referenceImages dans INSTANCES (format Vertex AI)
+      // au lieu de parameters (format qui ne fonctionne pas)
       const requestBody: any = {
         instances: [{ prompt: prompt }],
         parameters: {
-          aspectRatio: aspectRatio
+          aspectRatio: aspectRatio,
+          durationSeconds: 8
         }
       };
 
-      // Ajouter les images de référence si disponibles (max 3)
-      // Format: { image: { inlineData: { mimeType, data } }, referenceType: "asset" }
+      // Ajouter les images de référence dans instances[0] (format Vertex AI)
       if (referenceImages.length > 0) {
         const refImages = referenceImages.slice(0, 3).map(img => {
           // Extraire le mimeType depuis le préfixe data:
@@ -93,27 +92,26 @@ async function generateVideoWithVeo(
           
           return {
             image: {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Data
-              }
+              bytesBase64Encoded: base64Data,
+              mimeType: mimeType
             },
             referenceType: 'asset'
           };
         });
         
-        requestBody.parameters.referenceImages = refImages;
-        console.log(`🖼️ ${refImages.length} image(s) de référence ajoutée(s)`);
+        // Mettre referenceImages dans instances[0], pas dans parameters
+        requestBody.instances[0].referenceImages = refImages;
+        console.log(`🖼️ ${refImages.length} image(s) de référence ajoutée(s) dans instances`);
       }
 
       console.log('📦 Request body structure:', JSON.stringify({
-        instances: [{ prompt: prompt.substring(0, 50) + '...' }],
-        parameters: {
-          aspectRatio: requestBody.parameters.aspectRatio,
-          referenceImages: requestBody.parameters.referenceImages 
-            ? `[${requestBody.parameters.referenceImages.length} images]` 
+        instances: [{ 
+          prompt: prompt.substring(0, 50) + '...',
+          referenceImages: requestBody.instances[0].referenceImages 
+            ? `[${requestBody.instances[0].referenceImages.length} images]` 
             : undefined
-        }
+        }],
+        parameters: requestBody.parameters
       }));
 
       const startResponse = await fetch(startUrl, {
