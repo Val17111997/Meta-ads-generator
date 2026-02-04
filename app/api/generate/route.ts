@@ -547,8 +547,10 @@ export async function POST(request: Request) {
       try {
         const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
 
+        // IMPORTANT: Ne pas stocker le base64 dans le Sheet (trop grand: >50000 chars)
+        // On met juste un marqueur, la vidéo est retournée au frontend
         row.set('Statut', 'généré');
-        row.set('URL Image', videoUri);
+        row.set('URL Image', 'Vidéo générée - voir app');
         row.set('Date génération', new Date().toLocaleString('fr-FR'));
         await row.save();
 
