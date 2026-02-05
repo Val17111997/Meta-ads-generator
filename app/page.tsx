@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
+import SiteAnalyzer from './components/SiteAnalyzer';
 
 export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -577,6 +578,10 @@ export default function Home() {
           </h1>
           <p className="text-gray-600 text-lg">Powered by Google Gemini AI</p>
         </div>
+
+        {/* ========== SITE ANALYZER - NOUVEAU ========== */}
+        <SiteAnalyzer />
+        {/* ============================================= */}
 
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-6 text-center transform hover:scale-105 transition-transform">

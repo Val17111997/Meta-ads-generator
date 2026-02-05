@@ -1,0 +1,251 @@
+import { NextResponse } from 'next/server';
+import { google } from 'googleapis';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+// ============================================================
+// ANALYSE DE SITE + GÉNÉRATION DE PROMPTS AVEC CLAUDE
+// ============================================================
+
+interface SiteAnalysis {
+  brandName: string;
+  positioning: string;
+  usps: string[];
+  values: string[];
+  products: string[];
+  targetAudience: string;
+  tone: string;
+  socialProof: string[];
+}
+
+interface PromptItem {
+  prompt: string;
+  angle: string;
+  concept: string;
+  type: string;
+  format: string;
+}
+
+// Concepts créatifs 2026
+const CREATIVE_CONCEPTS = [
+  'UGC/Native style - authentic smartphone footage look',
+  'Problem-Solution split - before/after transformation',
+  'Before/After comparison - dramatic visual change',
+  'Testimonial/Social proof - real customer moment',
+  'Flat lay composition - products and ingredients artfully arranged',
+  'Grid composition - multiple product angles in mosaic',
+  'Comparatif visuel - side by side with competitor or alternative',
+  'Unboxing moment - hands opening package reveal',
+  'Founder story - behind the scenes authenticity',
+  'Lifestyle aspiration - dream scenario with product',
+  'POV first person - subjective camera using product',
+  'ASMR sensory - close-up textures and sounds',
+  'Stop motion - playful animated product movement',
+  'Cinematic hero shot - dramatic lighting and angles',
+  'Tutorial/How-to - step by step demonstration'
+];
+
+// Fetch le contenu d'un site web
+async function fetchWebsite(url: string): Promise<string> {
+  try {
+    let normalizedUrl = url;
+    if (!normalizedUrl.startsWith('http')) {
+      normalizedUrl = 'https://' + normalizedUrl;
+    }
+    
+    const response = await fetch(normalizedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; MarketingBot/1.0)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    
+    const html = await response.text();
+    
+    // Extraire le texte pertinent du HTML
+    const cleanText = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .trim()
+      .slice(0, 15000);
+    
+    return cleanText;
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Erreur fetch ' + url + ':', errorMessage);
+    throw new Error('Impossible de charger le site: ' + errorMessage);
+  }
+}
+
+// Appeler Claude API pour analyser et générer des prompts
+async function callClaude(siteContent: string, siteUrl: string): Promise<{ analysis: SiteAnalysis; prompts: PromptItem[] }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY non configurée');
+  }
+  
+  const conceptsList = CREATIVE_CONCEPTS.map((c, i) => (i + 1) + '. ' + c).join('\n');
+  
+  const systemPrompt = 'Tu es un expert en marketing digital et création de contenu publicitaire pour les réseaux sociaux (Meta Ads, TikTok, Instagram).\n\nTa mission : analyser un site web de marque et générer 50 prompts créatifs pour la génération d\'images et vidéos publicitaires avec l\'IA (Gemini/Veo).\n\nCONCEPTS CRÉATIFS 2026 À UTILISER :\n' + conceptsList + '\n\nRÈGLES POUR LES PROMPTS :\n- Chaque prompt doit être en ANGLAIS (meilleur pour les modèles IA)\n- Décrire précisément la scène visuelle, l\'éclairage, l\'ambiance, le cadrage\n- Mentionner le produit de manière naturelle sans forcer\n- Varier les angles marketing : bénéfices, émotions, social proof, lifestyle\n- Adapter au ton et positionnement de la marque\n- Finir chaque prompt par "no text, no watermark" pour éviter les textes générés\n- Format : descriptions visuelles détaillées de 2-4 phrases\n\nFORMAT DE RÉPONSE (JSON strict) :\n{\n  "analysis": {\n    "brandName": "nom de la marque",\n    "positioning": "positionnement en 1 phrase",\n    "usps": ["USP 1", "USP 2", "USP 3"],\n    "values": ["valeur 1", "valeur 2"],\n    "products": ["produit 1", "produit 2"],\n    "targetAudience": "cible principale",\n    "tone": "ton de communication",\n    "socialProof": ["preuve sociale 1", "preuve sociale 2"]\n  },\n  "prompts": [\n    {\n      "prompt": "le prompt créatif complet en anglais",\n      "angle": "nom de l\'angle marketing",\n      "concept": "concept créatif utilisé",\n      "type": "photo ou video",\n      "format": "9:16 ou 1:1 ou 16:9"\n    }\n  ]\n}\n\nGénère EXACTEMENT 50 prompts variés couvrant tous les angles et concepts.';
+
+  const userMessage = 'Analyse ce site web et génère 50 prompts marketing créatifs.\n\nURL du site : ' + siteUrl + '\n\nCONTENU DU SITE :\n' + siteContent + '\n\nRéponds UNIQUEMENT avec le JSON demandé, sans texte avant ou après.';
+
+  console.log('🤖 Appel Claude API...');
+  
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 8000,
+      messages: [
+        { role: 'user', content: userMessage }
+      ],
+      system: systemPrompt,
+    }),
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Erreur Claude API:', errorText);
+    throw new Error('Claude API error: ' + response.status);
+  }
+  
+  const data = await response.json();
+  const content = data.content[0]?.text;
+  
+  if (!content) {
+    throw new Error('Réponse Claude vide');
+  }
+  
+  console.log('✅ Réponse Claude reçue');
+  
+  // Parser le JSON
+  try {
+    const cleanContent = content
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
+    
+    const result = JSON.parse(cleanContent);
+    return result;
+  } catch (parseError) {
+    console.error('Erreur parsing JSON:', content.slice(0, 500));
+    throw new Error('Impossible de parser la réponse Claude');
+  }
+}
+
+// Ajouter les prompts au Google Sheet
+async function addPromptsToSheet(prompts: PromptItem[], brandName: string): Promise<number> {
+  const auth = new google.auth.GoogleAuth({
+    credentials: {
+      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+
+  const sheets = google.sheets({ version: 'v4', auth });
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+  
+  if (!spreadsheetId) {
+    throw new Error('GOOGLE_SHEET_ID non configuré');
+  }
+
+  // Format : Prompt | Format | Avec Texte | Avec Logo | Produit | Type | Statut | URL Image | Date
+  const rows = prompts.map(p => [
+    p.prompt,
+    p.format || '9:16',
+    'non',
+    'non',
+    brandName,
+    p.type || 'photo',
+    '',
+    '',
+    ''
+  ]);
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: "'Feuille 1'!A:I",
+    valueInputOption: 'USER_ENTERED',
+    requestBody: {
+      values: rows,
+    },
+  });
+
+  console.log('✅ ' + rows.length + ' prompts ajoutés au Sheet');
+  return rows.length;
+}
+
+// ============================================================
+// ENDPOINT POST
+// ============================================================
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { url, addToSheet = true } = body;
+    
+    if (!url) {
+      return NextResponse.json({
+        success: false,
+        error: 'URL du site requise'
+      }, { status: 400 });
+    }
+    
+    console.log('🌐 Analyse du site: ' + url);
+    
+    // Étape 1 : Fetch le contenu du site
+    console.log('📥 Récupération du contenu...');
+    const siteContent = await fetchWebsite(url);
+    console.log('📄 Contenu récupéré: ' + siteContent.length + ' caractères');
+    
+    // Étape 2 : Analyser avec Claude et générer les prompts
+    console.log('🧠 Analyse avec Claude...');
+    const { analysis, prompts } = await callClaude(siteContent, url);
+    console.log('✅ ' + prompts.length + ' prompts générés');
+    
+    // Étape 3 : Ajouter au Google Sheet si demandé
+    let addedCount = 0;
+    if (addToSheet && prompts.length > 0) {
+      console.log('📊 Ajout au Google Sheet...');
+      addedCount = await addPromptsToSheet(prompts, analysis.brandName);
+    }
+    
+    return NextResponse.json({
+      success: true,
+      analysis,
+      prompts,
+      promptCount: prompts.length,
+      addedToSheet: addedCount,
+      message: prompts.length + ' prompts générés pour ' + analysis.brandName,
+    });
+    
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('❌ Erreur:', errorMessage);
+    return NextResponse.json({
+      success: false,
+      error: errorMessage
+    }, { status: 500 });
+  }
+}
