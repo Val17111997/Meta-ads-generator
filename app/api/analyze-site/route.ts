@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
-import { google } from 'googleapis';
+import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// ============================================================
-// ANALYSE DE SITE + GÉNÉRATION DE PROMPTS AVEC CLAUDE
-// ============================================================
+// Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 interface SiteAnalysis {
   brandName: string;
@@ -67,7 +69,6 @@ async function fetchWebsite(url: string): Promise<string> {
     
     const html = await response.text();
     
-    // Extraire le texte pertinent du HTML
     const cleanText = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -92,7 +93,7 @@ async function fetchWebsite(url: string): Promise<string> {
 }
 
 // Appeler Claude API pour analyser et générer des prompts
-async function callClaude(siteContent: string, siteUrl: string): Promise<{ analysis: SiteAnalysis; prompts: PromptItem[] }> {
+async function callClaude(siteContent: string, siteUrl: string, existingCount: number = 0): Promise<{ analysis: SiteAnalysis; prompts: PromptItem[] }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   
   if (!apiKey) {
@@ -101,9 +102,13 @@ async function callClaude(siteContent: string, siteUrl: string): Promise<{ analy
   
   const conceptsList = CREATIVE_CONCEPTS.map((c, i) => (i + 1) + '. ' + c).join('\n');
   
-  const systemPrompt = 'Tu es un expert en marketing digital et création de contenu publicitaire pour les réseaux sociaux (Meta Ads, TikTok, Instagram).\n\nTa mission : analyser un site web de marque et générer 50 prompts créatifs pour la génération d\'images et vidéos publicitaires avec l\'IA (Gemini/Veo).\n\nCONCEPTS CRÉATIFS 2026 À UTILISER :\n' + conceptsList + '\n\nRÈGLES POUR LES PROMPTS :\n- Chaque prompt doit être en ANGLAIS (meilleur pour les modèles IA)\n- Décrire précisément la scène visuelle, l\'éclairage, l\'ambiance, le cadrage\n- Mentionner le produit de manière naturelle sans forcer\n- Varier les angles marketing : bénéfices, émotions, social proof, lifestyle\n- Adapter au ton et positionnement de la marque\n- Finir chaque prompt par "no text, no watermark" pour éviter les textes générés\n- Format : descriptions visuelles détaillées de 2-4 phrases\n\nFORMAT DE RÉPONSE (JSON strict) :\n{\n  "analysis": {\n    "brandName": "nom de la marque",\n    "positioning": "positionnement en 1 phrase",\n    "usps": ["USP 1", "USP 2", "USP 3"],\n    "values": ["valeur 1", "valeur 2"],\n    "products": ["produit 1", "produit 2"],\n    "targetAudience": "cible principale",\n    "tone": "ton de communication",\n    "socialProof": ["preuve sociale 1", "preuve sociale 2"]\n  },\n  "prompts": [\n    {\n      "prompt": "le prompt créatif complet en anglais",\n      "angle": "nom de l\'angle marketing",\n      "concept": "concept créatif utilisé",\n      "type": "photo ou video",\n      "format": "9:16 ou 1:1 ou 16:9"\n    }\n  ]\n}\n\nGénère EXACTEMENT 20 prompts variés couvrant différents angles et concepts.';
+  const variationNote = existingCount > 0 
+    ? '\n\nIMPORTANT: Cette marque a déjà ' + existingCount + ' prompts. Génère des prompts DIFFÉRENTS et NOUVEAUX, avec des angles et concepts variés que tu n\'as pas encore utilisés.'
+    : '';
+  
+  const systemPrompt = 'Tu es un expert en marketing digital et création de contenu publicitaire pour les réseaux sociaux (Meta Ads, TikTok, Instagram).\n\nTa mission : analyser un site web de marque et générer 20 prompts créatifs pour la génération d\'images et vidéos publicitaires avec l\'IA (Gemini/Veo).\n\nCONCEPTS CRÉATIFS 2026 À UTILISER :\n' + conceptsList + '\n\nRÈGLES POUR LES PROMPTS :\n- Chaque prompt doit être en ANGLAIS (meilleur pour les modèles IA)\n- Décrire précisément la scène visuelle, l\'éclairage, l\'ambiance, le cadrage\n- Mentionner le produit de manière naturelle sans forcer\n- Varier les angles marketing : bénéfices, émotions, social proof, lifestyle\n- Adapter au ton et positionnement de la marque\n- Finir chaque prompt par "no text, no watermark" pour éviter les textes générés\n- Format : descriptions visuelles détaillées de 2-4 phrases' + variationNote + '\n\nFORMAT DE RÉPONSE (JSON strict) :\n{\n  "analysis": {\n    "brandName": "nom de la marque",\n    "positioning": "positionnement en 1 phrase",\n    "usps": ["USP 1", "USP 2", "USP 3"],\n    "values": ["valeur 1", "valeur 2"],\n    "products": ["produit 1", "produit 2"],\n    "targetAudience": "cible principale",\n    "tone": "ton de communication",\n    "socialProof": ["preuve sociale 1", "preuve sociale 2"]\n  },\n  "prompts": [\n    {\n      "prompt": "le prompt créatif complet en anglais",\n      "angle": "nom de l\'angle marketing",\n      "concept": "concept créatif utilisé",\n      "type": "photo ou video",\n      "format": "9:16 ou 1:1 ou 16:9"\n    }\n  ]\n}\n\nGénère EXACTEMENT 20 prompts variés couvrant différents angles et concepts.';
 
-  const userMessage = 'Analyse ce site web et génère 50 prompts marketing créatifs.\n\nURL du site : ' + siteUrl + '\n\nCONTENU DU SITE :\n' + siteContent + '\n\nRéponds UNIQUEMENT avec le JSON demandé, sans texte avant ou après.';
+  const userMessage = 'Analyse ce site web et génère 20 prompts marketing créatifs.\n\nURL du site : ' + siteUrl + '\n\nCONTENU DU SITE :\n' + siteContent + '\n\nRéponds UNIQUEMENT avec le JSON demandé, sans texte avant ou après.';
 
   console.log('🤖 Appel Claude API...');
   
@@ -139,7 +144,6 @@ async function callClaude(siteContent: string, siteUrl: string): Promise<{ analy
   
   console.log('✅ Réponse Claude reçue');
   
-  // Parser le JSON
   try {
     const cleanContent = content
       .replace(/```json\n?/g, '')
@@ -154,56 +158,52 @@ async function callClaude(siteContent: string, siteUrl: string): Promise<{ analy
   }
 }
 
-// Ajouter les prompts au Google Sheet
-async function addPromptsToSheet(prompts: PromptItem[], brandName: string): Promise<number> {
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    },
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
+// Ajouter les prompts à Supabase
+async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): Promise<number> {
+  const rows = prompts.map(p => ({
+    brand: brandName,
+    prompt: p.prompt,
+    format: p.format || '9:16',
+    type: p.type || 'photo',
+    angle: p.angle || null,
+    concept: p.concept || null,
+    status: 'pending',
+    image_url: null,
+  }));
 
-  const sheets = google.sheets({ version: 'v4', auth });
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-  
-  if (!spreadsheetId) {
-    throw new Error('GOOGLE_SHEET_ID non configuré');
+  const { data, error } = await supabase
+    .from('prompts')
+    .insert(rows)
+    .select();
+
+  if (error) {
+    console.error('Erreur Supabase:', error);
+    throw new Error('Erreur insertion Supabase: ' + error.message);
   }
 
-  // Format : Prompt | Format | Avec Texte | Avec Logo | Produit | Type | Statut | URL Image | Date
-  const rows = prompts.map(p => [
-    p.prompt,
-    p.format || '9:16',
-    'non',
-    'non',
-    brandName,
-    p.type || 'photo',
-    '',
-    '',
-    ''
-  ]);
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "'Feuille 1'!A:I",
-    valueInputOption: 'USER_ENTERED',
-    requestBody: {
-      values: rows,
-    },
-  });
-
-  console.log('✅ ' + rows.length + ' prompts ajoutés au Sheet');
+  console.log('✅ ' + rows.length + ' prompts ajoutés à Supabase');
   return rows.length;
 }
 
-// ============================================================
-// ENDPOINT POST
-// ============================================================
+// Compter les prompts existants pour une marque
+async function countExistingPrompts(brandName: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('prompts')
+    .select('*', { count: 'exact', head: true })
+    .eq('brand', brandName);
+
+  if (error) {
+    console.error('Erreur count:', error);
+    return 0;
+  }
+
+  return count || 0;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { url, addToSheet = true } = body;
+    const { url, brandOverride } = body;
     
     if (!url) {
       return NextResponse.json({
@@ -219,25 +219,28 @@ export async function POST(request: Request) {
     const siteContent = await fetchWebsite(url);
     console.log('📄 Contenu récupéré: ' + siteContent.length + ' caractères');
     
-    // Étape 2 : Analyser avec Claude et générer les prompts
+    // Étape 2 : Analyser avec Claude
     console.log('🧠 Analyse avec Claude...');
-    const { analysis, prompts } = await callClaude(siteContent, url);
-    console.log('✅ ' + prompts.length + ' prompts générés');
+    const { analysis, prompts } = await callClaude(siteContent, url, 0);
+    const brandName = brandOverride || analysis.brandName;
     
-    // Étape 3 : Ajouter au Google Sheet si demandé
-    let addedCount = 0;
-    if (addToSheet && prompts.length > 0) {
-      console.log('📊 Ajout au Google Sheet...');
-      addedCount = await addPromptsToSheet(prompts, analysis.brandName);
-    }
+    // Compter les existants pour info
+    const existingCount = await countExistingPrompts(brandName);
+    console.log('📊 Prompts existants pour ' + brandName + ': ' + existingCount);
+    console.log('✅ ' + prompts.length + ' nouveaux prompts générés');
+    
+    // Étape 3 : Ajouter à Supabase
+    console.log('💾 Ajout à Supabase...');
+    const addedCount = await addPromptsToSupabase(prompts, brandName);
     
     return NextResponse.json({
       success: true,
       analysis,
       prompts,
       promptCount: prompts.length,
-      addedToSheet: addedCount,
-      message: prompts.length + ' prompts générés pour ' + analysis.brandName,
+      addedToDatabase: addedCount,
+      totalForBrand: existingCount + addedCount,
+      message: prompts.length + ' prompts générés pour ' + brandName,
     });
     
   } catch (error: unknown) {

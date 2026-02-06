@@ -10,6 +10,7 @@
   "dependencies": {
     "@fal-ai/serverless-client": "^0.15.0",
     "@google/generative-ai": "^0.21.0",
+    "@supabase/supabase-js": "^2.95.3",
     "google-auth-library": "^10.5.0",
     "google-spreadsheet": "^4.1.0",
     "googleapis": "^171.3.0",
