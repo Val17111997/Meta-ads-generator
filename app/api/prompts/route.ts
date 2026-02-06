@@ -8,68 +8,86 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// GET - Récupérer les prompts
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const brand = searchParams.get('brand');
+    const status = searchParams.get('status');
+    const limit = parseInt(searchParams.get('limit') || '500');
     
-    // Si pas de marque spécifiée, retourner les stats globales
-    let query = supabase.from('prompts').select('*', { count: 'exact', head: true });
+    let query = supabase
+      .from('prompts')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
     
-    if (brand) {
-      query = query.eq('brand', brand);
+    if (status) {
+      query = query.eq('status', status);
     }
     
-    const { count: total } = await query;
+    const { data, error } = await query;
     
-    // Prompts en attente
-    let pendingQuery = supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-    
-    if (brand) {
-      pendingQuery = pendingQuery.eq('brand', brand);
+    if (error) {
+      throw new Error(error.message);
     }
-    
-    const { count: remaining } = await pendingQuery;
-    
-    // Prompts générés
-    let generatedQuery = supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'generated');
-    
-    if (brand) {
-      generatedQuery = generatedQuery.eq('brand', brand);
-    }
-    
-    const { count: generated } = await generatedQuery;
-    
-    // Liste des marques
-    const { data: brands } = await supabase
-      .from('prompts')
-      .select('brand')
-      .order('brand');
-    
-    const uniqueBrands = [...new Set(brands?.map(b => b.brand) || [])];
     
     return NextResponse.json({
-      total: total || 0,
-      remaining: remaining || 0,
-      generated: generated || 0,
-      brands: uniqueBrands,
+      success: true,
+      prompts: data || [],
     });
     
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Erreur stats:', errorMessage);
     return NextResponse.json({
-      total: 0,
-      remaining: 0,
-      generated: 0,
-      brands: [],
+      success: false,
       error: errorMessage
-    });
+    }, { status: 500 });
+  }
+}
+
+// PATCH - Mettre à jour un prompt
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, ...updates } = body;
+    
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'ID requis' }, { status: 400 });
+    }
+    
+    const { data, error } = await supabase
+      .from('prompts')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw new Error(error.message);
+    
+    return NextResponse.json({ success: true, prompt: data });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
+  }
+}
+
+// DELETE - Supprimer un prompt
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'ID requis' }, { status: 400 });
+    }
+    
+    const { error } = await supabase.from('prompts').delete().eq('id', id);
+    
+    if (error) throw new Error(error.message);
+    
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
