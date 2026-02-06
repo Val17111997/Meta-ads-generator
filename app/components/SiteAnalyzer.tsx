@@ -26,12 +26,17 @@ interface AnalyzeResult {
   analysis?: SiteAnalysis;
   prompts?: PromptItem[];
   promptCount?: number;
-  addedToSheet?: number;
+  addedToDatabase?: number;
+  totalForBrand?: number;
   message?: string;
   error?: string;
 }
 
-export default function SiteAnalyzer() {
+interface SiteAnalyzerProps {
+  onPromptsGenerated?: () => void;
+}
+
+export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
@@ -49,23 +54,25 @@ export default function SiteAnalyzer() {
     setResult(null);
 
     try {
-      // Simuler les étapes de progression
       setTimeout(() => setStatus('📥 Analyse du contenu...'), 2000);
       setTimeout(() => setStatus('🧠 Claude génère les prompts...'), 5000);
-      setTimeout(() => setStatus('✍️ Création des 50 prompts...'), 10000);
-      setTimeout(() => setStatus('📊 Ajout au Google Sheet...'), 25000);
+      setTimeout(() => setStatus('✍️ Création des 20 prompts...'), 10000);
+      setTimeout(() => setStatus('💾 Ajout à la base de données...'), 20000);
 
       const response = await fetch('/api/analyze-site', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), addToSheet: true }),
+        body: JSON.stringify({ url: url.trim() }),
       });
 
       const data: AnalyzeResult = await response.json();
 
       if (data.success) {
-        setStatus(`✅ ${data.promptCount} prompts générés et ajoutés au Sheet !`);
+        setStatus(`✅ ${data.promptCount} prompts générés et ajoutés !`);
         setResult(data);
+        if (onPromptsGenerated) {
+          onPromptsGenerated();
+        }
       } else {
         setStatus(`❌ ${data.error}`);
       }
@@ -83,10 +90,9 @@ export default function SiteAnalyzer() {
       </h2>
       
       <p className="text-gray-600 mb-4">
-        Entre l'URL de ton site web. Claude va l'analyser et générer <strong>50 prompts marketing</strong> optimisés pour tes publicités.
+        Entre l'URL de ton site web. Claude va l'analyser et générer <strong>20 prompts marketing</strong> optimisés pour tes publicités.
       </p>
 
-      {/* Input URL */}
       <div className="flex gap-3 mb-4">
         <input
           type="url"
@@ -119,7 +125,6 @@ export default function SiteAnalyzer() {
         </button>
       </div>
 
-      {/* Status */}
       {status && (
         <div className={`p-4 rounded-xl mb-4 ${
           status.startsWith('✅') ? 'bg-green-50 text-green-700' :
@@ -130,10 +135,8 @@ export default function SiteAnalyzer() {
         </div>
       )}
 
-      {/* Résultats */}
       {result?.success && result.analysis && (
         <div className="space-y-4">
-          {/* Analyse de la marque */}
           <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5">
             <h3 className="font-bold text-lg mb-3 text-purple-800">
               📊 Analyse : {result.analysis.brandName}
@@ -166,19 +169,17 @@ export default function SiteAnalyzer() {
             </div>
           </div>
 
-          {/* Stats prompts */}
           <div className="flex gap-4">
             <div className="flex-1 bg-green-50 rounded-xl p-4 text-center">
               <div className="text-3xl font-bold text-green-600">{result.promptCount}</div>
               <div className="text-sm text-green-700">Prompts générés</div>
             </div>
             <div className="flex-1 bg-blue-50 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-blue-600">{result.addedToSheet}</div>
-              <div className="text-sm text-blue-700">Ajoutés au Sheet</div>
+              <div className="text-3xl font-bold text-blue-600">{result.totalForBrand || result.addedToDatabase}</div>
+              <div className="text-sm text-blue-700">Total en base</div>
             </div>
           </div>
 
-          {/* Toggle voir les prompts */}
           <button
             onClick={() => setShowPrompts(!showPrompts)}
             className="w-full py-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium transition-colors"
@@ -186,7 +187,6 @@ export default function SiteAnalyzer() {
             {showPrompts ? '🔼 Masquer les prompts' : '🔽 Voir les prompts générés'}
           </button>
 
-          {/* Liste des prompts */}
           {showPrompts && result.prompts && (
             <div className="max-h-96 overflow-y-auto space-y-3 border rounded-xl p-4">
               {result.prompts.map((p, i) => (
@@ -212,9 +212,8 @@ export default function SiteAnalyzer() {
         </div>
       )}
 
-      {/* Info */}
       <div className="mt-4 text-xs text-gray-500">
-        💡 L'analyse prend environ 30-40 secondes. Les prompts sont automatiquement ajoutés à ton Google Sheet.
+        💡 L'analyse prend environ 30-40 secondes. Les prompts sont automatiquement ajoutés à ta base de données.
       </div>
     </div>
   );

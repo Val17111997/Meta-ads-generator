@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 
 interface Prompt {
   id: string;
@@ -15,21 +15,18 @@ interface Prompt {
   created_at: string;
 }
 
-interface PromptsTableProps {
-  onSelectPrompt?: (prompt: Prompt) => void;
+export interface PromptsTableRef {
+  reload: () => void;
 }
 
-export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
+const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [loading, setLoading] = useState(true);
-  const [brands, setBrands] = useState<string[]>([]);
-  const [selectedBrand, setSelectedBrand] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<Prompt>>({});
   const [showAddModal, setShowAddModal] = useState(false);
   const [newPrompt, setNewPrompt] = useState({
-    brand: '',
     prompt: '',
     format: '9:16',
     type: 'photo',
@@ -38,12 +35,18 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
   });
   const [stats, setStats] = useState({ total: 0, pending: 0, generated: 0 });
 
-  // Charger les prompts
+  // Exposer la méthode reload au parent
+  useImperativeHandle(ref, () => ({
+    reload: () => {
+      loadPrompts();
+      loadStats();
+    }
+  }));
+
   async function loadPrompts() {
     setLoading(true);
     try {
       let url = '/api/prompts?limit=500';
-      if (selectedBrand) url += '&brand=' + encodeURIComponent(selectedBrand);
       if (statusFilter) url += '&status=' + statusFilter;
       
       const res = await fetch(url);
@@ -58,12 +61,10 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
     setLoading(false);
   }
 
-  // Charger les stats et marques
   async function loadStats() {
     try {
       const res = await fetch('/api/stats');
       const data = await res.json();
-      setBrands(data.brands || []);
       setStats({
         total: data.total || 0,
         pending: data.remaining || 0,
@@ -77,9 +78,8 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
   useEffect(() => {
     loadStats();
     loadPrompts();
-  }, [selectedBrand, statusFilter]);
+  }, [statusFilter]);
 
-  // Démarrer l'édition
   function startEdit(prompt: Prompt) {
     setEditingId(prompt.id);
     setEditValues({
@@ -92,7 +92,6 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
     });
   }
 
-  // Sauvegarder l'édition
   async function saveEdit(id: string) {
     try {
       const res = await fetch('/api/prompts', {
@@ -110,21 +109,16 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
     }
   }
 
-  // Annuler l'édition
   function cancelEdit() {
     setEditingId(null);
     setEditValues({});
   }
 
-  // Supprimer un prompt
   async function deletePrompt(id: string) {
     if (!confirm('Supprimer ce prompt ?')) return;
     
     try {
-      const res = await fetch('/api/prompts?id=' + id, {
-        method: 'DELETE',
-      });
-      
+      const res = await fetch('/api/prompts?id=' + id, { method: 'DELETE' });
       if (res.ok) {
         loadPrompts();
         loadStats();
@@ -134,31 +128,25 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
     }
   }
 
-  // Ajouter un nouveau prompt
   async function addPrompt() {
-    if (!newPrompt.brand || !newPrompt.prompt) {
-      alert('Marque et prompt requis !');
+    if (!newPrompt.prompt) {
+      alert('Le prompt est requis !');
       return;
     }
     
+    // Récupérer le nom de la marque depuis le premier prompt existant ou utiliser un défaut
+    const brandName = prompts.length > 0 ? prompts[0].brand : 'Ma Marque';
+    
     try {
-      // On utilise l'API Supabase directement via une nouvelle route
       const res = await fetch('/api/prompts/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newPrompt),
+        body: JSON.stringify({ ...newPrompt, brand: brandName }),
       });
       
       if (res.ok) {
         setShowAddModal(false);
-        setNewPrompt({
-          brand: selectedBrand || '',
-          prompt: '',
-          format: '9:16',
-          type: 'photo',
-          angle: '',
-          concept: '',
-        });
+        setNewPrompt({ prompt: '', format: '9:16', type: 'photo', angle: '', concept: '' });
         loadPrompts();
         loadStats();
       }
@@ -167,45 +155,30 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
     }
   }
 
-  // Supprimer tous les prompts d'une marque
-  async function deleteAllForBrand() {
-    if (!selectedBrand) {
-      alert('Sélectionne une marque d\'abord');
-      return;
-    }
-    if (!confirm(`Supprimer TOUS les prompts de "${selectedBrand}" ?`)) return;
+  async function deleteAll() {
+    if (!confirm('Supprimer TOUS les prompts ? Cette action est irréversible !')) return;
     
-    try {
-      const res = await fetch(`/api/prompts?brand=${encodeURIComponent(selectedBrand)}&deleteAll=true`, {
-        method: 'DELETE',
-      });
-      
-      if (res.ok) {
-        loadPrompts();
-        loadStats();
-      }
-    } catch (err) {
-      console.error('Erreur suppression:', err);
+    // Supprimer tous les prompts un par un (pas idéal mais simple)
+    for (const p of prompts) {
+      await fetch('/api/prompts?id=' + p.id, { method: 'DELETE' });
     }
+    loadPrompts();
+    loadStats();
   }
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">📋 Tableau des Prompts</h2>
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              setNewPrompt(prev => ({ ...prev, brand: selectedBrand || '' }));
-              setShowAddModal(true);
-            }}
+            onClick={() => setShowAddModal(true)}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-all"
           >
-            ➕ Ajouter un prompt
+            ➕ Ajouter
           </button>
           <button
-            onClick={loadPrompts}
+            onClick={() => { loadPrompts(); loadStats(); }}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-all"
           >
             🔄 Rafraîchir
@@ -213,7 +186,6 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-blue-50 rounded-lg p-4 text-center">
           <div className="text-3xl font-bold text-blue-600">{stats.total}</div>
@@ -229,23 +201,9 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
         </div>
       </div>
 
-      {/* Filtres */}
       <div className="flex gap-4 mb-6">
         <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Marque</label>
-          <select
-            value={selectedBrand}
-            onChange={(e) => setSelectedBrand(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="">Toutes les marques</option>
-            {brands.map(brand => (
-              <option key={brand} value={brand}>{brand}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Statut</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Filtrer par statut</label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -258,10 +216,10 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
             <option value="error">Erreur</option>
           </select>
         </div>
-        {selectedBrand && (
+        {prompts.length > 0 && (
           <div className="flex items-end">
             <button
-              onClick={deleteAllForBrand}
+              onClick={deleteAll}
               className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-semibold transition-all"
             >
               🗑️ Tout supprimer
@@ -270,7 +228,6 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
         )}
       </div>
 
-      {/* Table */}
       {loading ? (
         <div className="text-center py-12">
           <div className="animate-spin text-4xl mb-4">⏳</div>
@@ -280,14 +237,13 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
         <div className="text-center py-12 bg-gray-50 rounded-xl">
           <div className="text-6xl mb-4">📭</div>
           <p className="text-gray-600 font-medium">Aucun prompt trouvé</p>
-          <p className="text-gray-400 text-sm mt-2">Utilise l'analyseur de site pour générer des prompts</p>
+          <p className="text-gray-400 text-sm mt-2">Utilise l'analyseur de site ci-dessus pour générer des prompts</p>
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b">
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">Marque</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700 w-1/2">Prompt</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Format</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Type</th>
@@ -299,11 +255,7 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
               {prompts.map((prompt) => (
                 <tr key={prompt.id} className="border-b hover:bg-gray-50">
                   {editingId === prompt.id ? (
-                    // Mode édition
                     <>
-                      <td className="px-4 py-3">
-                        <span className="text-sm font-medium">{prompt.brand}</span>
-                      </td>
                       <td className="px-4 py-3">
                         <textarea
                           value={editValues.prompt || ''}
@@ -340,34 +292,18 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
                           className="px-2 py-1 border rounded text-sm"
                         >
                           <option value="pending">En attente</option>
-                          <option value="generating">En cours</option>
                           <option value="generated">Généré</option>
-                          <option value="error">Erreur</option>
                         </select>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
-                          <button
-                            onClick={() => saveEdit(prompt.id)}
-                            className="px-2 py-1 bg-green-600 text-white rounded text-xs font-semibold"
-                          >
-                            ✓
-                          </button>
-                          <button
-                            onClick={cancelEdit}
-                            className="px-2 py-1 bg-gray-400 text-white rounded text-xs font-semibold"
-                          >
-                            ✕
-                          </button>
+                          <button onClick={() => saveEdit(prompt.id)} className="px-2 py-1 bg-green-600 text-white rounded text-xs font-semibold">✓</button>
+                          <button onClick={cancelEdit} className="px-2 py-1 bg-gray-400 text-white rounded text-xs font-semibold">✕</button>
                         </div>
                       </td>
                     </>
                   ) : (
-                    // Mode lecture
                     <>
-                      <td className="px-4 py-3">
-                        <span className="text-sm font-medium text-purple-600">{prompt.brand}</span>
-                      </td>
                       <td className="px-4 py-3">
                         <p className="text-sm text-gray-700 line-clamp-2">{prompt.prompt}</p>
                         {prompt.angle && (
@@ -399,29 +335,8 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
-                          {prompt.status === 'pending' && onSelectPrompt && (
-                            <button
-                              onClick={() => onSelectPrompt(prompt)}
-                              className="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded text-xs font-semibold"
-                              title="Générer"
-                            >
-                              🎨
-                            </button>
-                          )}
-                          <button
-                            onClick={() => startEdit(prompt)}
-                            className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold"
-                            title="Modifier"
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            onClick={() => deletePrompt(prompt.id)}
-                            className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-semibold"
-                            title="Supprimer"
-                          >
-                            🗑️
-                          </button>
+                          <button onClick={() => startEdit(prompt)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold" title="Modifier">✏️</button>
+                          <button onClick={() => deletePrompt(prompt.id)} className="px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-semibold" title="Supprimer">🗑️</button>
                         </div>
                       </td>
                     </>
@@ -433,28 +348,12 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
         </div>
       )}
 
-      {/* Modal Ajout */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4">➕ Ajouter un prompt</h3>
             
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Marque *</label>
-                <input
-                  type="text"
-                  value={newPrompt.brand}
-                  onChange={(e) => setNewPrompt(prev => ({ ...prev, brand: e.target.value }))}
-                  placeholder="Nom de la marque"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  list="brand-suggestions"
-                />
-                <datalist id="brand-suggestions">
-                  {brands.map(b => <option key={b} value={b} />)}
-                </datalist>
-              </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Prompt *</label>
                 <textarea
@@ -519,22 +418,16 @@ export default function PromptsTable({ onSelectPrompt }: PromptsTableProps) {
             </div>
             
             <div className="flex gap-2 mt-6">
-              <button
-                onClick={addPrompt}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold"
-              >
-                ✅ Ajouter
-              </button>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="flex-1 px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-semibold"
-              >
-                Annuler
-              </button>
+              <button onClick={addPrompt} className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold">✅ Ajouter</button>
+              <button onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-semibold">Annuler</button>
             </div>
           </div>
         </div>
       )}
     </div>
   );
-}
+});
+
+PromptsTable.displayName = 'PromptsTable';
+
+export default PromptsTable;
