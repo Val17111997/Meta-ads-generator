@@ -68,7 +68,7 @@ export default function Home() {
       try {
         const parsed = JSON.parse(savedGeneratedImages);
         setGeneratedImages(parsed);
-        addLog(`🖼️ ${parsed.length} image(s) générée(s) restaurée(s)`);
+        addLog(`🖼️ ${parsed.length} média(s) généré(s) restauré(s)`);
       } catch (e) {
         console.error('Erreur restauration images générées:', e);
         localStorage.removeItem('generatedImages');
@@ -230,7 +230,7 @@ export default function Home() {
             return updated;
           });
           setStats(prev => ({ generated: prev.generated + 1, remaining: data.remaining, total: prev.total }));
-          addLog(`✅ Image générée`);
+          addLog(`✅ Média généré`);
         }
       } else {
         setError(data.message);
@@ -383,12 +383,12 @@ export default function Home() {
         </div>
 
         <SiteAnalyzer />
-        <PromptsTable />
+        <PromptsTable productGroups={Object.keys(productGroups)} />
 
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-6 text-center hover:scale-105 transition-transform">
             <div className="text-5xl font-bold text-green-600 mb-2">{stats.generated}</div>
-            <div className="text-sm text-gray-600 uppercase">✅ Générées</div>
+            <div className="text-sm text-gray-600 uppercase">✅ Générés</div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-6 text-center hover:scale-105 transition-transform">
             <div className="text-5xl font-bold text-orange-600 mb-2">{stats.remaining}</div>
@@ -513,7 +513,7 @@ export default function Home() {
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <div className="flex gap-4 mb-4">
             <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-5 rounded-xl font-bold text-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shadow-lg">
-              {isGenerating ? <span className="flex items-center justify-center gap-3"><span className="animate-spin">⏳</span> Génération...</span> : '🎯 Générer 1 image'}
+              {isGenerating ? <span className="flex items-center justify-center gap-3"><span className="animate-spin">⏳</span> Génération...</span> : '🎯 Générer'}
             </button>
             <button onClick={toggleAutoMode} disabled={stats.remaining === 0} className={`flex-1 px-8 py-5 rounded-xl font-bold text-xl text-white transition-all hover:scale-105 active:scale-95 shadow-lg ${autoMode ? 'bg-gradient-to-r from-red-600 to-red-700 animate-pulse' : 'bg-gradient-to-r from-green-600 to-green-700'} disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed`}>
               {autoMode ? '⏸️ ARRÊTER' : '🚀 MODE AUTO'}
@@ -526,7 +526,7 @@ export default function Home() {
 
         <div className="grid grid-cols-2 gap-6">
           <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-4">🖼️ Dernière image</h2>
+            <h2 className="text-2xl font-bold mb-4">🖼️ Dernier média</h2>
             {currentImage ? (
               <div>
                 <div className="relative aspect-square rounded-xl overflow-hidden shadow-lg mb-4 border-4 border-gray-100">
@@ -537,7 +537,7 @@ export default function Home() {
               </div>
             ) : (
               <div className="aspect-square rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                <div className="text-center"><div className="text-6xl mb-4">🎨</div><p className="text-gray-400">Aucune image</p></div>
+                <div className="text-center"><div className="text-6xl mb-4">🎨</div><p className="text-gray-400">Aucun média</p></div>
               </div>
             )}
           </div>

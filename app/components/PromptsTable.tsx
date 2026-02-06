@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 
 interface Prompt {
   id: string;
@@ -12,6 +12,7 @@ interface Prompt {
   concept: string | null;
   status: string;
   image_url: string | null;
+  product_group: string | null;
   created_at: string;
 }
 
@@ -19,7 +20,11 @@ export interface PromptsTableRef {
   reload: () => void;
 }
 
-const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
+interface PromptsTableProps {
+  productGroups?: string[];
+}
+
+const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGroups = [] }, ref) => {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -32,10 +37,10 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
     type: 'photo',
     angle: '',
     concept: '',
+    product_group: '',
   });
   const [stats, setStats] = useState({ total: 0, pending: 0, generated: 0 });
 
-  // Exposer la méthode reload au parent
   useImperativeHandle(ref, () => ({
     reload: () => {
       loadPrompts();
@@ -89,6 +94,7 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
       angle: prompt.angle || '',
       concept: prompt.concept || '',
       status: prompt.status,
+      product_group: prompt.product_group || '',
     });
   }
 
@@ -134,7 +140,6 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
       return;
     }
     
-    // Récupérer le nom de la marque depuis le premier prompt existant ou utiliser un défaut
     const brandName = prompts.length > 0 ? prompts[0].brand : 'Ma Marque';
     
     try {
@@ -146,7 +151,7 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
       
       if (res.ok) {
         setShowAddModal(false);
-        setNewPrompt({ prompt: '', format: '9:16', type: 'photo', angle: '', concept: '' });
+        setNewPrompt({ prompt: '', format: '9:16', type: 'photo', angle: '', concept: '', product_group: '' });
         loadPrompts();
         loadStats();
       }
@@ -158,7 +163,6 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
   async function deleteAll() {
     if (!confirm('Supprimer TOUS les prompts ? Cette action est irréversible !')) return;
     
-    // Supprimer tous les prompts un par un (pas idéal mais simple)
     for (const p of prompts) {
       await fetch('/api/prompts?id=' + p.id, { method: 'DELETE' });
     }
@@ -244,7 +248,8 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b">
-                <th className="text-left px-4 py-3 font-semibold text-gray-700 w-1/2">Prompt</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">Prompt</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">Produit</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Format</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Type</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Statut</th>
@@ -263,6 +268,18 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
                           className="w-full px-2 py-1 border rounded text-sm"
                           rows={3}
                         />
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={editValues.product_group || ''}
+                          onChange={(e) => setEditValues(prev => ({ ...prev, product_group: e.target.value }))}
+                          className="px-2 py-1 border rounded text-sm w-full"
+                        >
+                          <option value="">-- Aucun --</option>
+                          {productGroups.map(g => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-4 py-3">
                         <select
@@ -304,12 +321,21 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
                     </>
                   ) : (
                     <>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 max-w-md">
                         <p className="text-sm text-gray-700 line-clamp-2">{prompt.prompt}</p>
                         {prompt.angle && (
                           <span className="inline-block mt-1 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">
                             {prompt.angle}
                           </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {prompt.product_group ? (
+                          <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded font-medium">
+                            📦 {prompt.product_group}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">Non défini</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -363,6 +389,20 @@ const PromptsTable = forwardRef<PromptsTableRef>((props, ref) => {
                   rows={4}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Groupe de produits</label>
+                <select
+                  value={newPrompt.product_group}
+                  onChange={(e) => setNewPrompt(prev => ({ ...prev, product_group: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">-- Sélectionner un groupe --</option>
+                  {productGroups.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
