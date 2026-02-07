@@ -40,6 +40,7 @@ export default function Home() {
   const [includeText, setIncludeText] = useState(true);
   const [includeLogo, setIncludeLogo] = useState(false);
   const [videoEngine, setVideoEngine] = useState<'veo' | 'kling'>('veo');
+  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
 
   const isGeneratingRef = useRef(false);
   const autoModeRef = useRef(false);
@@ -340,22 +341,56 @@ export default function Home() {
     setShowNewGroupModal(false);
   }
 
-  function handleGroupImageUpload(groupName: string, e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  function processFilesForGroup(groupName: string, files: FileList | File[]) {
+    const fileArray = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (fileArray.length === 0) return;
     setUploading(true);
-    addLog(`📤 Upload de ${files.length} image(s)…`);
-    Array.from(files).forEach(file => {
+    addLog(`📤 Upload de ${fileArray.length} image(s)…`);
+    let processed = 0;
+    fileArray.forEach(file => {
       const reader = new FileReader();
       reader.onload = async (event) => {
         const base64 = event.target?.result as string;
         const compressed = await compressImage(base64);
         setProductGroups(prev => ({ ...prev, [groupName]: [...(prev[groupName] || []), { name: file.name, url: compressed }] }));
         addLog(`✅ ${file.name} ajouté`);
+        processed++;
+        if (processed >= fileArray.length) setUploading(false);
       };
       reader.readAsDataURL(file);
     });
-    setUploading(false);
+  }
+
+  function handleGroupImageUpload(groupName: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    processFilesForGroup(groupName, files);
+  }
+
+  function handleGroupDrop(groupName: string, e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverGroup(null);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+    processFilesForGroup(groupName, files);
+  }
+
+  function handleGroupDragOver(groupName: string, e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverGroup(groupName);
+  }
+
+  function handleGroupDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    // Seulement si on quitte vraiment la zone (pas un enfant)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX, y = e.clientY;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setDragOverGroup(null);
+    }
   }
 
   function deleteGroupImage(groupName: string, imageName: string) {
@@ -527,7 +562,17 @@ export default function Home() {
           ) : (
             <div className="space-y-4">
               {Object.entries(productGroups).map(([groupName, images]) => (
-                <div key={groupName} className="border-2 border-gray-200 rounded-xl p-4">
+                <div 
+                  key={groupName} 
+                  className={`border-2 rounded-xl p-4 transition-all duration-200 ${
+                    dragOverGroup === groupName 
+                      ? 'border-blue-500 bg-blue-50 shadow-lg shadow-blue-100 scale-[1.01]' 
+                      : 'border-gray-200'
+                  }`}
+                  onDrop={(e) => handleGroupDrop(groupName, e)}
+                  onDragOver={(e) => handleGroupDragOver(groupName, e)}
+                  onDragLeave={handleGroupDragLeave}
+                >
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-bold">📂 {groupName} <span className="text-sm text-gray-500 font-normal">({images.length})</span></h3>
                     <div className="flex gap-2">
@@ -539,21 +584,34 @@ export default function Home() {
                     </div>
                   </div>
                   {images.length === 0 ? (
-                    <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                      <p className="text-gray-500 text-sm">Aucune image</p>
+                    <div className={`text-center py-8 rounded-lg border-2 border-dashed transition-all ${
+                      dragOverGroup === groupName
+                        ? 'border-blue-400 bg-blue-50'
+                        : 'border-gray-300 bg-gray-50'
+                    }`}>
+                      <p className="text-gray-500 text-sm">
+                        {dragOverGroup === groupName ? '📥 Lâche pour ajouter !' : '📎 Glisse des images ici ou clique "+ Images"'}
+                      </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-4 gap-3">
-                      {images.map((img, i) => (
-                        <div key={i} className="relative group">
-                          <img src={img.url} alt={img.name} className="w-full h-24 object-cover rounded-lg shadow-md" />
-                          <button onClick={() => deleteGroupImage(groupName, img.name)} className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                            <span className="bg-red-600 text-white px-3 py-1 rounded text-sm font-semibold">🗑️</span>
-                          </button>
-                          <p className="text-xs text-gray-600 mt-1 truncate">{img.name}</p>
+                    <>
+                      <div className="grid grid-cols-4 gap-3">
+                        {images.map((img, i) => (
+                          <div key={i} className="relative group">
+                            <img src={img.url} alt={img.name} className="w-full h-24 object-cover rounded-lg shadow-md" />
+                            <button onClick={() => deleteGroupImage(groupName, img.name)} className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                              <span className="bg-red-600 text-white px-3 py-1 rounded text-sm font-semibold">🗑️</span>
+                            </button>
+                            <p className="text-xs text-gray-600 mt-1 truncate">{img.name}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {dragOverGroup === groupName && (
+                        <div className="mt-3 text-center py-2 rounded-lg border-2 border-dashed border-blue-400 bg-blue-50 animate-pulse">
+                          <p className="text-blue-600 text-sm font-medium">📥 Lâche pour ajouter !</p>
                         </div>
-                      ))}
-                    </div>
+                      )}
+                    </>
                   )}
                 </div>
               ))}
