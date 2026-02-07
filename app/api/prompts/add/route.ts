@@ -15,49 +15,44 @@ function getSupabase() {
   );
 }
 
+// POST /api/prompts/add — body: { prompt, format, type, brand, angle, concept, product_group }
 export async function POST(request: Request) {
   try {
-    const supabase = getSupabase();
-    const body = await request.json();
-    const { brand, prompt, format, type, angle, concept, product_group } = body;
-    
-    if (!brand || !prompt) {
-      return NextResponse.json({
-        success: false,
-        error: 'Marque et prompt requis'
-      }, { status: 400 });
+    const clientId = process.env.CLIENT_ID;
+    if (!clientId) {
+      return NextResponse.json({ success: false, error: 'CLIENT_ID non configuré' }, { status: 500 });
     }
-    
-    const { data, error } = await supabase
+
+    const body = await request.json();
+    const { prompt, format = '9:16', type = 'photo', brand = '', angle = '', concept = '', product_group = null } = body;
+
+    if (!prompt || !prompt.trim()) {
+      return NextResponse.json({ success: false, error: 'Le prompt est requis' }, { status: 400 });
+    }
+
+    const { data, error } = await getSupabase()
       .from('prompts')
       .insert({
+        client_id: clientId, // Toujours injecté côté serveur, jamais par le client
+        prompt: prompt.trim(),
+        format,
+        type,
         brand,
-        prompt,
-        format: format || '9:16',
-        type: type || 'photo',
         angle: angle || null,
         concept: concept || null,
         product_group: product_group || null,
         status: 'pending',
-        image_url: null,
       })
       .select()
       .single();
-    
+
     if (error) {
-      throw new Error(error.message);
+      console.error('Erreur ajout prompt:', error);
+      return NextResponse.json({ success: false, error: 'Erreur ajout en base' }, { status: 500 });
     }
-    
-    return NextResponse.json({
-      success: true,
-      prompt: data
-    });
-    
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({
-      success: false,
-      error: errorMessage
-    }, { status: 500 });
+
+    return NextResponse.json({ success: true, prompt: data });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

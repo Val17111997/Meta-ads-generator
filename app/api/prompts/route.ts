@@ -15,115 +15,96 @@ function getSupabase() {
   );
 }
 
-// GET - Récupérer les prompts via RPC
-export async function GET() {
+function getClientId() {
+  const clientId = process.env.CLIENT_ID;
+  if (!clientId) throw new Error('CLIENT_ID non configuré');
+  return clientId;
+}
+
+// GET /api/prompts?limit=500&status=pending
+export async function GET(request: Request) {
   try {
-    const supabase = getSupabase();
-    
-    const { data: prompts, error } = await supabase.rpc('get_all_prompts');
-    
-    if (error) {
-      throw new Error(error.message);
+    const clientId = getClientId();
+    const { searchParams } = new URL(request.url);
+    const limit = parseInt(searchParams.get('limit') || '100');
+    const status = searchParams.get('status');
+
+    let query = getSupabase()
+      .from('prompts')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (status) {
+      query = query.eq('status', status);
     }
-    
-    // Calculer les stats à partir des données
-    const total = prompts?.length || 0;
-    const pending = prompts?.filter((p: any) => p.status === 'pending').length || 0;
-    const generated = prompts?.filter((p: any) => p.status === 'generated').length || 0;
-    
-    return NextResponse.json({
-      success: true,
-      prompts: prompts || [],
-      stats: { total, pending, generated }
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-      }
-    });
-    
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({
-      success: false,
-      error: errorMessage
-    }, { status: 500 });
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Erreur lecture prompts:', error);
+      return NextResponse.json({ success: false, error: 'Erreur base de données' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, prompts: data || [] });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// PATCH - Mettre à jour un prompt
+// PATCH /api/prompts — body: { id, ...fields }
 export async function PATCH(request: Request) {
   try {
-    const supabase = getSupabase();
+    const clientId = getClientId();
     const body = await request.json();
     const { id, ...updates } = body;
-    
+
     if (!id) {
-      return NextResponse.json({
-        success: false,
-        error: 'ID du prompt requis'
-      }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'ID requis' }, { status: 400 });
     }
-    
-    const { data, error } = await supabase
+
+    const { error } = await getSupabase()
       .from('prompts')
       .update(updates)
       .eq('id', id)
-      .select()
-      .single();
-    
+      .eq('client_id', clientId); // Sécurité : empêche de modifier les prompts d'un autre client
+
     if (error) {
-      throw new Error(error.message);
+      console.error('Erreur update prompt:', error);
+      return NextResponse.json({ success: false, error: 'Erreur mise à jour' }, { status: 500 });
     }
-    
-    return NextResponse.json({
-      success: true,
-      prompt: data
-    });
-    
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({
-      success: false,
-      error: errorMessage
-    }, { status: 500 });
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// DELETE - Supprimer un prompt
+// DELETE /api/prompts?id=xxx
 export async function DELETE(request: Request) {
   try {
-    const supabase = getSupabase();
+    const clientId = getClientId();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    
+
     if (!id) {
-      return NextResponse.json({
-        success: false,
-        error: 'ID du prompt requis'
-      }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'ID requis' }, { status: 400 });
     }
-    
-    const { error } = await supabase
+
+    const { error } = await getSupabase()
       .from('prompts')
       .delete()
-      .eq('id', id);
-    
+      .eq('id', id)
+      .eq('client_id', clientId); // Sécurité : empêche de supprimer les prompts d'un autre client
+
     if (error) {
-      throw new Error(error.message);
+      console.error('Erreur delete prompt:', error);
+      return NextResponse.json({ success: false, error: 'Erreur suppression' }, { status: 500 });
     }
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Prompt supprimé'
-    });
-    
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({
-      success: false,
-      error: errorMessage
-    }, { status: 500 });
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

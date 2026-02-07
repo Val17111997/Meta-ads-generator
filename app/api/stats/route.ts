@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const supabase = createClient(
+function getSupabase() {
+  return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!,
     {
@@ -13,28 +13,34 @@ export async function GET() {
       }
     }
   );
+}
 
-  const { data, error } = await supabase.rpc('get_prompts_stats');
-
-  if (error) {
-    console.error('Erreur RPC stats:', error);
-    return NextResponse.json({
-      total: 0,
-      remaining: 0,
-      generated: 0,
-      error: error.message
-    });
-  }
-
-  return NextResponse.json({
-    total: data?.total || 0,
-    remaining: data?.remaining || 0,
-    generated: data?.generated || 0,
-  }, {
-    headers: {
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
+// GET /api/stats
+export async function GET() {
+  try {
+    const clientId = process.env.CLIENT_ID;
+    if (!clientId) {
+      return NextResponse.json({ total: 0, generated: 0, remaining: 0, error: 'CLIENT_ID non configuré' });
     }
-  });
+
+    const { data, error } = await getSupabase()
+      .from('prompts')
+      .select('status')
+      .eq('client_id', clientId);
+
+    if (error) {
+      console.error('Erreur stats:', error);
+      return NextResponse.json({ total: 0, generated: 0, remaining: 0 });
+    }
+
+    const prompts = data || [];
+    const total = prompts.length;
+    const generated = prompts.filter(p => p.status === 'generated').length;
+    const remaining = prompts.filter(p => p.status === 'pending').length;
+
+    return NextResponse.json({ total, generated, remaining });
+  } catch (error: any) {
+    console.error('Erreur stats:', error);
+    return NextResponse.json({ total: 0, generated: 0, remaining: 0 });
+  }
 }

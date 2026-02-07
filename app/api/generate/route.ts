@@ -458,6 +458,14 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { productGroups = {}, brandAssets = [], includeText = true, includeLogo = false, videoEngine = 'veo' } = body;
     
+    const clientId = process.env.CLIENT_ID;
+    if (!clientId) {
+      return NextResponse.json({ 
+        success: false,
+        error: 'CLIENT_ID non configuré sur ce déploiement' 
+      }, { status: 500 });
+    }
+
     if (!process.env.GOOGLE_API_KEY) {
       return NextResponse.json({ 
         success: false,
@@ -477,6 +485,7 @@ export async function POST(request: Request) {
     const { data: pendingPrompts, error: fetchError } = await getSupabase()
       .from('prompts')
       .select('*')
+      .eq('client_id', clientId)
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
       .limit(1);
@@ -549,6 +558,7 @@ export async function POST(request: Request) {
     const { data: allPending } = await getSupabase()
       .from('prompts')
       .select('id')
+      .eq('client_id', clientId)
       .eq('status', 'pending');
     const remainingCount = (allPending?.length || 1) - 1;
     
