@@ -40,6 +40,12 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
     product_group: '',
   });
   const [stats, setStats] = useState({ total: 0, pending: 0, generated: 0 });
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importFormat, setImportFormat] = useState('9:16');
+  const [importType, setImportType] = useState('photo');
+  const [importProductGroup, setImportProductGroup] = useState('');
+  const [importing, setImporting] = useState(false);
 
   useImperativeHandle(ref, () => ({
     reload: () => {
@@ -170,11 +176,68 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
     loadStats();
   }
 
+  async function importPrompts() {
+    if (!importText.trim()) {
+      alert('Colle au moins un prompt !');
+      return;
+    }
+
+    setImporting(true);
+    const brandName = prompts.length > 0 ? prompts[0].brand : 'Ma Marque';
+    
+    // Sépare par ligne, filtre les lignes vides
+    const lines = importText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const line of lines) {
+      try {
+        const res = await fetch('/api/prompts/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: line,
+            format: importFormat,
+            type: importType,
+            product_group: importProductGroup || null,
+            brand: brandName,
+            angle: '',
+            concept: '',
+          }),
+        });
+        
+        if (res.ok) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } catch (err) {
+        errorCount++;
+      }
+    }
+
+    setImporting(false);
+    setShowImportModal(false);
+    setImportText('');
+    
+    alert(`✅ ${successCount} prompt(s) importé(s)${errorCount > 0 ? `\n❌ ${errorCount} erreur(s)` : ''}`);
+    
+    loadPrompts();
+    loadStats();
+  }
+
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">📋 Tableau des Prompts</h2>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-all"
+          >
+            📋 Import en masse
+          </button>
           <button
             onClick={() => setShowAddModal(true)}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-all"
@@ -460,6 +523,105 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
             <div className="flex gap-2 mt-6">
               <button onClick={addPrompt} className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold">✅ Ajouter</button>
               <button onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-semibold">Annuler</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold mb-4">📋 Import en masse</h3>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <p className="text-blue-800 text-sm">
+                <strong>💡 Astuce :</strong> Colle tes prompts depuis Excel, Google Sheets ou un fichier texte. 
+                <br />Un prompt par ligne. Les lignes vides seront ignorées.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Prompts (un par ligne) *
+                </label>
+                <textarea
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                  placeholder={`Close-up shot of hands holding the product...
+Lifestyle scene showing someone using the product...
+Before/after comparison with dramatic lighting...
+UGC-style video of customer unboxing...`}
+                  rows={10}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {importText.split('\n').filter(l => l.trim()).length} prompt(s) détecté(s)
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Format (pour tous)</label>
+                  <select
+                    value={importFormat}
+                    onChange={(e) => setImportFormat(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="9:16">9:16 (Story/Reel)</option>
+                    <option value="1:1">1:1 (Carré)</option>
+                    <option value="16:9">16:9 (Paysage)</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type (pour tous)</label>
+                  <select
+                    value={importType}
+                    onChange={(e) => setImportType(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="photo">📷 Photo</option>
+                    <option value="video">🎬 Vidéo</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Groupe produit</label>
+                  <select
+                    value={importProductGroup}
+                    onChange={(e) => setImportProductGroup(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="">-- Aucun --</option>
+                    {productGroups.map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex gap-2 mt-6">
+              <button 
+                onClick={importPrompts} 
+                disabled={importing || !importText.trim()}
+                className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white rounded-lg font-semibold"
+              >
+                {importing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin">⏳</span> Import en cours...
+                  </span>
+                ) : (
+                  `📋 Importer ${importText.split('\n').filter(l => l.trim()).length} prompt(s)`
+                )}
+              </button>
+              <button 
+                onClick={() => { setShowImportModal(false); setImportText(''); }} 
+                className="flex-1 px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-semibold"
+              >
+                Annuler
+              </button>
             </div>
           </div>
         </div>
