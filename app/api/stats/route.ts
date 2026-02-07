@@ -3,40 +3,44 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 export async function GET() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  // Debug: affiche les variables
+  if (!url || !key) {
+    return NextResponse.json({
+      error: 'Missing env vars',
+      hasUrl: !!url,
+      hasKey: !!key,
+    });
+  }
+
+  const supabase = createClient(url, key);
+
   try {
-    const { count: total } = await supabase
+    const { count: total, error } = await supabase
       .from('prompts')
       .select('*', { count: 'exact', head: true });
 
-    const { count: remaining } = await supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-
-    const { count: generated } = await supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'generated');
+    if (error) {
+      return NextResponse.json({
+        error: error.message,
+        url: url.substring(0, 30),
+      });
+    }
 
     return NextResponse.json({
       total: total || 0,
-      remaining: remaining || 0,
-      generated: generated || 0,
-    });
-
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Erreur stats:', errorMessage);
-    return NextResponse.json({
-      total: 0,
       remaining: 0,
       generated: 0,
+      debug: 'OK from Supabase',
+      url: url.substring(0, 30),
+    });
+
+  } catch (e: any) {
+    return NextResponse.json({
+      error: e.message,
     });
   }
 }
