@@ -4,11 +4,18 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// Supabase client — lazy init pour éviter crash au build
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!,
+    {
+      global: {
+        fetch: (url, options = {}) => fetch(url, { ...options, cache: 'no-store' })
+      }
+    }
+  );
+}
 
 interface SiteAnalysis {
   brandName: string;
@@ -158,9 +165,13 @@ async function callClaude(siteContent: string, siteUrl: string, existingCount: n
   }
 }
 
-// Ajouter les prompts à Supabase
+// Ajouter les prompts à Supabase avec client_id
 async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): Promise<number> {
+  const clientId = process.env.CLIENT_ID;
+  if (!clientId) throw new Error('CLIENT_ID non configuré');
+
   const rows = prompts.map(p => ({
+    client_id: clientId,
     brand: brandName,
     prompt: p.prompt,
     format: p.format || '9:16',
@@ -171,7 +182,7 @@ async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): P
     image_url: null,
   }));
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from('prompts')
     .insert(rows)
     .select();
@@ -185,11 +196,15 @@ async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): P
   return rows.length;
 }
 
-// Compter les prompts existants pour une marque
+// Compter les prompts existants pour une marque (filtré par client_id)
 async function countExistingPrompts(brandName: string): Promise<number> {
-  const { count, error } = await supabase
+  const clientId = process.env.CLIENT_ID;
+  if (!clientId) return 0;
+
+  const { count, error } = await getSupabase()
     .from('prompts')
     .select('*', { count: 'exact', head: true })
+    .eq('client_id', clientId)
     .eq('brand', brandName);
 
   if (error) {
