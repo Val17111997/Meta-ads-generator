@@ -156,7 +156,10 @@ async function generateVideoWithVeo(
             updatedOp.response?.videos?.[0]?.uri;
 
           if (!videoUri) {
-            throw new Error(`Veo done mais pas de vidéo dans la réponse`);
+            // Structure inattendue — logger pour debug mais ne pas crasher
+            console.warn('⚠️ Veo done mais structure réponse inattendue:', JSON.stringify(updatedOp.response || updatedOp).substring(0, 500));
+            // Continuer le polling au cas où la réponse arrive dans un format différent plus tard
+            continue;
           }
 
           console.log('✅ Vidéo générée ! URI:', videoUri.substring(0, 80) + '...');
@@ -183,7 +186,7 @@ async function generateVideoWithVeo(
       throw new Error(`Timeout polling Veo | operation:${operation.name}`);
 
     } catch (error: any) {
-      if (error.message.includes('Timeout polling') || error.message.includes('done mais pas de vidéo')) {
+      if (error.message.includes('Timeout polling')) {
         throw error;
       }
       if (attempt === retries) throw error;
@@ -352,6 +355,18 @@ async function generateVideoWithKling(
   const imageUrl = referenceImages.length > 0 ? referenceImages[0] : null;
   if (!imageUrl) throw new Error('Kling image-to-video nécessite au moins une image');
 
+  // Kling accepte soit une URL HTTP, soit du base64 BRUT (sans préfixe data:)
+  let klingImage: string;
+  if (imageUrl.startsWith('data:')) {
+    const base64Part = imageUrl.split(',')[1];
+    if (!base64Part || base64Part.length < 100) {
+      throw new Error('Image base64 invalide ou trop petite');
+    }
+    klingImage = base64Part; // Base64 brut, sans le préfixe data:image/...
+  } else {
+    klingImage = imageUrl; // URL HTTP directe
+  }
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const token = await generateKlingJWT();
@@ -360,7 +375,7 @@ async function generateVideoWithKling(
       const requestBody: any = {
         model_name: 'kling-v3',
         prompt: prompt,
-        image: imageUrl,
+        image: klingImage,
         cfg_scale: 0.5,
         mode: 'pro',
         duration: '5',
