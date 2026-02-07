@@ -5,6 +5,21 @@ import JSZip from 'jszip';
 import SiteAnalyzer from './components/SiteAnalyzer';
 import PromptsTable from './components/PromptsTable';
 
+// ============================================================
+// Helper : fetch sécurisé — ne throw jamais, retourne toujours du JSON
+// ============================================================
+async function safeFetch(url: string, options?: RequestInit): Promise<{ ok: boolean; data: any }> {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { data = { error: 'Réponse inattendue du serveur' }; }
+    return { ok: res.ok && !data.error, data };
+  } catch {
+    return { ok: false, data: { error: 'Connexion au serveur impossible' } };
+  }
+}
+
 export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
@@ -36,6 +51,15 @@ export default function Home() {
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString('fr-FR');
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 19)]);
+  };
+
+  // Messages user-friendly (jamais de messages techniques)
+  const USER_MESSAGES = {
+    serverBusy: '⏳ Le serveur est occupé, nouvelle tentative automatique…',
+    networkError: '📡 Problème de connexion, nouvelle tentative…',
+    generationFailed: '⚠️ La génération n\'a pas abouti, réessaie dans un instant.',
+    noPrompts: '✅ Tous les prompts ont été générés !',
+    noImages: '📸 Ajoute des images produit pour commencer.',
   };
 
   useEffect(() => {
@@ -87,7 +111,7 @@ export default function Home() {
       try {
         const parsed = JSON.parse(savedVideoPolling);
         setVideoPolling(parsed);
-        addLog(`🎬 Polling vidéo repris: ${parsed.operation}`);
+        addLog(`🎬 Polling vidéo repris`);
       } catch (e) {
         localStorage.removeItem('videoPolling');
       }
@@ -97,43 +121,58 @@ export default function Home() {
   useEffect(() => {
     if (!videoPolling) return;
     localStorage.setItem('videoPolling', JSON.stringify(videoPolling));
-    addLog(`🎬 Polling vidéo démarré: ${videoPolling.operation.split('/').pop()}`);
+    addLog(`🎬 Vidéo en cours de génération…`);
     let stopped = false;
+    let retryCount = 0;
+    const maxRetries = 30; // ~6 min max de polling
 
     const pollOnce = async () => {
       if (stopped) return;
-      try {
-        const res = await fetch(`/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}`);
-        const result = await res.json();
-        if (result.success && result.done && result.videoUri) {
-          addLog('✅ Vidéo générée avec succès !');
-          setCurrentImage(result.videoUri);
-          setCurrentPrompt(videoPolling.prompt);
-          const newImage = { url: result.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
-          setGeneratedImages(prev => {
-            const updated = [newImage, ...prev];
-            if (updated.length === 20) {
-              createAndDownloadZip(updated, batchCount).then(success => {
-                if (success) { setBatchCount(c => c + 1); setGeneratedImages([]); localStorage.removeItem('generatedImages'); }
-              });
-            }
-            return updated;
-          });
-          setStats(prev => ({ ...prev, generated: prev.generated + 1, remaining: prev.remaining - 1 }));
-          setVideoPolling(null);
-          localStorage.removeItem('videoPolling');
-          loadStats();
-        } else if (result.pending) {
-          addLog('⏳ Vidéo encore en cours... (re-poll dans 12s)');
-          setTimeout(pollOnce, 12000);
+      
+      const { ok, data } = await safeFetch(`/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}`);
+      
+      if (!ok && !data.pending) {
+        retryCount++;
+        if (retryCount < maxRetries) {
+          setTimeout(pollOnce, 15000);
+          return;
+        }
+        addLog('⚠️ La vidéo prend trop de temps, réessaie plus tard.');
+        setVideoPolling(null);
+        localStorage.removeItem('videoPolling');
+        return;
+      }
+      
+      if (data.success && data.done && data.videoUri) {
+        addLog('✅ Vidéo générée avec succès !');
+        setCurrentImage(data.videoUri);
+        setCurrentPrompt(videoPolling.prompt);
+        const newImage = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
+        setGeneratedImages(prev => {
+          const updated = [newImage, ...prev];
+          if (updated.length === 20) {
+            createAndDownloadZip(updated, batchCount).then(success => {
+              if (success) { setBatchCount(c => c + 1); setGeneratedImages([]); localStorage.removeItem('generatedImages'); }
+            });
+          }
+          return updated;
+        });
+        setStats(prev => ({ ...prev, generated: prev.generated + 1, remaining: prev.remaining - 1 }));
+        setVideoPolling(null);
+        localStorage.removeItem('videoPolling');
+        loadStats();
+      } else if (data.pending) {
+        retryCount = 0;
+        setTimeout(pollOnce, 12000);
+      } else {
+        retryCount++;
+        if (retryCount < maxRetries) {
+          setTimeout(pollOnce, 15000);
         } else {
-          addLog(`❌ Erreur polling vidéo: ${result.error}`);
+          addLog('⚠️ La vidéo n\'a pas pu être générée.');
           setVideoPolling(null);
           localStorage.removeItem('videoPolling');
         }
-      } catch (err: any) {
-        addLog(`❌ Erreur fetch veo-poll: ${err.message}`);
-        setTimeout(pollOnce, 15000);
       }
     };
     pollOnce();
@@ -143,14 +182,14 @@ export default function Home() {
   useEffect(() => {
     if (Object.keys(productGroups).length > 0) {
       try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } 
-      catch (e) { addLog('⚠️ Limite localStorage atteinte'); }
+      catch (e) { /* silencieux */ }
     }
   }, [productGroups]);
 
   useEffect(() => {
     if (brandAssets.length > 0) {
       try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } 
-      catch (e) { addLog('⚠️ Limite localStorage atteinte'); }
+      catch (e) { /* silencieux */ }
     }
   }, [brandAssets]);
 
@@ -163,7 +202,7 @@ export default function Home() {
           })));
           localStorage.setItem('generatedImages', JSON.stringify(compressed));
           localStorage.setItem('batchCount', batchCount.toString());
-        } catch (e) { addLog('⚠️ Impossible de sauvegarder'); }
+        } catch (e) { /* silencieux */ }
       };
       saveCompressed();
     } else if (generatedImages.length === 0) {
@@ -177,31 +216,42 @@ export default function Home() {
   }, [autoMode]);
 
   const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoRetryCount = useRef(0);
 
   function scheduleNext() {
     if (!autoModeRef.current) return;
     if (isGeneratingRef.current) { autoTimerRef.current = setTimeout(scheduleNext, 3000); return; }
     if (videoPollingRef.current) { autoTimerRef.current = setTimeout(scheduleNext, 5000); return; }
-    generateSingle().then(() => { if (autoModeRef.current) { autoTimerRef.current = setTimeout(scheduleNext, 3000); } });
+    generateSingle().then(() => { 
+      if (autoModeRef.current) { 
+        autoRetryCount.current = 0;
+        autoTimerRef.current = setTimeout(scheduleNext, 3000); 
+      } 
+    }).catch(() => {
+      if (autoModeRef.current) {
+        autoRetryCount.current++;
+        const delay = Math.min(3000 * Math.pow(2, autoRetryCount.current), 30000);
+        autoTimerRef.current = setTimeout(scheduleNext, delay);
+      }
+    });
   }
 
   async function loadStats() {
-    try {
-      const response = await fetch('/api/stats');
-      const data = await response.json();
+    const { ok, data } = await safeFetch('/api/stats');
+    if (ok) {
       setStats({ generated: data.generated || 0, remaining: data.remaining || 0, total: data.total || 0 });
       addLog(`📊 Stats: ${data.total || 0} prompts, ${data.remaining || 0} en attente`);
-    } catch (err) { addLog('❌ Erreur chargement stats'); }
+    }
   }
 
   async function generateSingle() {
     if (isGenerating) return;
     const totalImages = Object.values(productGroups).reduce((sum, imgs) => sum + imgs.length, 0);
-    if (totalImages === 0) { setError('⚠️ Upload au moins une image produit !'); addLog('❌ Aucune image produit'); return; }
+    if (totalImages === 0) { setError(USER_MESSAGES.noImages); setTimeout(() => setError(null), 5000); return; }
     
     setIsGenerating(true);
     setError(null);
-    addLog('🎨 Démarrage génération...');
+    addLog('🎨 Génération en cours…');
     
     try {
       const maxImages = 10;
@@ -209,18 +259,28 @@ export default function Home() {
         Object.entries(productGroups).map(([name, images]) => [name, images.slice(0, Math.ceil(maxImages / Object.keys(productGroups).length))])
       );
       
-      const response = await fetch('/api/generate', {
+      const { ok, data } = await safeFetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'single', productGroups: limitedGroups, brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type })), includeText, includeLogo }),
       });
       
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Erreur génération');
+      if (!ok) {
+        const msg = data?.message || data?.error || '';
+        if (msg.includes('Aucun prompt') || msg.includes('en attente')) {
+          setError(USER_MESSAGES.noPrompts);
+          setAutoMode(false);
+        } else {
+          setError(USER_MESSAGES.serverBusy);
+          addLog('⏳ Serveur occupé, réessaie…');
+        }
+        setTimeout(() => setError(null), 5000);
+        return;
+      }
       
       if (data.success) {
         if (data.videoOperation && !data.imageUrl) {
-          addLog(`🎬 Vidéo en cours...`);
+          addLog(`🎬 Vidéo en cours de création…`);
           setVideoPolling({ operation: data.videoOperation, prompt: data.prompt });
         } else {
           const newImage = { url: data.imageUrl, prompt: data.prompt, timestamp: Date.now(), mediaType: data.mediaType || 'image' };
@@ -232,24 +292,30 @@ export default function Home() {
             return updated;
           });
           setStats(prev => ({ generated: prev.generated + 1, remaining: data.remaining, total: prev.total }));
-          addLog(`✅ Média généré`);
+          addLog(`✅ Média généré avec succès`);
         }
       } else {
-        setError(data.message);
-        addLog('⚠️ ' + data.message);
-        setAutoMode(false);
+        const msg = data.message || '';
+        if (msg.includes('Aucun prompt') || msg.includes('en attente')) {
+          setError(USER_MESSAGES.noPrompts);
+          setAutoMode(false);
+        } else if (msg.includes('introuvable')) {
+          setError(`📦 Groupe de produit non trouvé. Vérifie tes groupes.`);
+        } else {
+          setError(USER_MESSAGES.generationFailed);
+        }
+        setTimeout(() => setError(null), 5000);
       }
-    } catch (err: any) {
-      setError(err.message);
-      addLog('❌ ' + err.message);
-      setAutoMode(false);
+    } catch {
+      setError(USER_MESSAGES.networkError);
+      setTimeout(() => setError(null), 5000);
     } finally {
       setIsGenerating(false);
     }
   }
 
   function toggleAutoMode() {
-    if (autoMode) { setAutoMode(false); addLog('⏸️ Mode auto arrêté'); } 
+    if (autoMode) { setAutoMode(false); addLog('⏸️ Mode auto arrêté'); autoRetryCount.current = 0; } 
     else { setAutoMode(true); addLog('🚀 Mode auto démarré'); }
   }
 
@@ -266,7 +332,7 @@ export default function Home() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setUploading(true);
-    addLog(`📤 Upload de ${files.length} image(s)...`);
+    addLog(`📤 Upload de ${files.length} image(s)…`);
     Array.from(files).forEach(file => {
       const reader = new FileReader();
       reader.onload = async (event) => {
@@ -282,7 +348,6 @@ export default function Home() {
 
   function deleteGroupImage(groupName: string, imageName: string) {
     setProductGroups(prev => ({ ...prev, [groupName]: prev[groupName].filter(img => img.name !== imageName) }));
-    addLog(`🗑️ ${imageName} supprimé`);
   }
 
   function deleteGroup(groupName: string) {
@@ -311,7 +376,7 @@ export default function Home() {
     setUploadingBrand(false);
   }
 
-  function deleteBrandAsset(name: string) { setBrandAssets(prev => prev.filter(a => a.name !== name)); addLog(`🗑️ ${name} supprimé`); }
+  function deleteBrandAsset(name: string) { setBrandAssets(prev => prev.filter(a => a.name !== name)); }
   function clearBrandAssets() { if (confirm('Supprimer la charte ?')) { setBrandAssets([]); localStorage.removeItem('brandAssets'); addLog('🗑️ Charte effacée'); } }
 
   async function compressImage(base64: string): Promise<string> {
@@ -328,21 +393,23 @@ export default function Home() {
         ctx.drawImage(img, 0, 0, w, h);
         resolve(canvas.toDataURL('image/jpeg', 0.5));
       };
+      img.onerror = () => resolve(base64);
       img.src = base64;
     });
   }
 
   function downloadSingleImage(url: string, prompt: string, ts: number) {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `meta-ad-${ts}.${url.startsWith('data:video') ? 'mp4' : 'png'}`;
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    addLog('📥 Téléchargé');
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `meta-ad-${ts}.${url.startsWith('data:video') ? 'mp4' : 'png'}`;
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    } catch { /* silencieux */ }
   }
 
   function downloadAllImages() {
-    if (generatedImages.length === 0) { addLog('❌ Rien à télécharger'); return; }
-    addLog(`📦 Création ZIP...`);
+    if (generatedImages.length === 0) return;
+    addLog(`📦 Création ZIP…`);
     createAndDownloadZip(generatedImages, batchCount);
   }
 
@@ -373,7 +440,7 @@ export default function Home() {
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
       addLog(`✅ ZIP téléchargé`);
       return true;
-    } catch (e) { addLog('❌ Erreur ZIP'); return false; }
+    } catch (e) { addLog('⚠️ Erreur lors du téléchargement'); return false; }
   }
 
   return (
@@ -525,15 +592,23 @@ export default function Home() {
           </div>
           <div className="flex gap-4 mb-4">
             <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-5 rounded-xl font-bold text-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shadow-lg">
-              {isGenerating ? <span className="flex items-center justify-center gap-3"><span className="animate-spin">⏳</span> Génération...</span> : '🎯 Générer'}
+              {isGenerating ? <span className="flex items-center justify-center gap-3"><span className="animate-spin">⏳</span> Génération…</span> : '🎯 Générer'}
             </button>
             <button onClick={toggleAutoMode} disabled={stats.remaining === 0} className={`flex-1 px-8 py-5 rounded-xl font-bold text-xl text-white transition-all hover:scale-105 active:scale-95 shadow-lg ${autoMode ? 'bg-gradient-to-r from-red-600 to-red-700 animate-pulse' : 'bg-gradient-to-r from-green-600 to-green-700'} disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed`}>
               {autoMode ? '⏸️ ARRÊTER' : '🚀 MODE AUTO'}
             </button>
           </div>
-          {error && <div className="mt-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg text-red-700 font-medium">❌ {error}</div>}
-          {autoMode && <div className="mt-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg text-green-700 font-medium animate-pulse">🤖 Mode auto actif</div>}
-          {videoPolling && <div className="mt-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg text-blue-700 font-medium animate-pulse">🎬 Vidéo en cours...</div>}
+          {error && (
+            <div className={`mt-4 p-4 rounded-lg font-medium transition-all ${
+              error.includes('✅') ? 'bg-green-50 border-2 border-green-200 text-green-700' :
+              error.includes('⏳') || error.includes('📡') ? 'bg-yellow-50 border-2 border-yellow-200 text-yellow-700' :
+              'bg-orange-50 border-2 border-orange-200 text-orange-700'
+            }`}>
+              {error}
+            </div>
+          )}
+          {autoMode && !error && <div className="mt-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg text-green-700 font-medium animate-pulse">🤖 Mode auto actif</div>}
+          {videoPolling && <div className="mt-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg text-blue-700 font-medium animate-pulse">🎬 Vidéo en cours de création…</div>}
         </div>
 
         <div className="grid grid-cols-2 gap-6">

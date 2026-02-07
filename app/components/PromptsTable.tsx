@@ -2,6 +2,19 @@
 
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 
+// Helper : fetch sécurisé — ne throw jamais
+async function safeFetch(url: string, options?: RequestInit): Promise<{ ok: boolean; data: any }> {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let data: any = {};
+    try { data = JSON.parse(text); } catch { data = { error: 'Réponse inattendue du serveur' }; }
+    return { ok: res.ok, data };
+  } catch {
+    return { ok: false, data: { error: 'Connexion au serveur impossible' } };
+  }
+}
+
 interface Prompt {
   id: string;
   brand: string;
@@ -56,33 +69,24 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
 
   async function loadPrompts() {
     setLoading(true);
-    try {
-      let url = '/api/prompts?limit=500';
-      if (statusFilter) url += '&status=' + statusFilter;
-      
-      const res = await fetch(url);
-      const data = await res.json();
-      
-      if (data.success) {
-        setPrompts(data.prompts || []);
-      }
-    } catch (err) {
-      console.error('Erreur chargement prompts:', err);
+    let url = '/api/prompts?limit=500';
+    if (statusFilter) url += '&status=' + statusFilter;
+    
+    const { ok, data } = await safeFetch(url);
+    if (ok && data.success) {
+      setPrompts(data.prompts || []);
     }
     setLoading(false);
   }
 
   async function loadStats() {
-    try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
+    const { ok, data } = await safeFetch('/api/stats');
+    if (ok) {
       setStats({
         total: data.total || 0,
         pending: data.remaining || 0,
         generated: data.generated || 0,
       });
-    } catch (err) {
-      console.error('Erreur chargement stats:', err);
     }
   }
 
@@ -105,19 +109,15 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
   }
 
   async function saveEdit(id: string) {
-    try {
-      const res = await fetch('/api/prompts', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, ...editValues }),
-      });
-      
-      if (res.ok) {
-        setEditingId(null);
-        loadPrompts();
-      }
-    } catch (err) {
-      console.error('Erreur sauvegarde:', err);
+    const { ok } = await safeFetch('/api/prompts', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...editValues }),
+    });
+    
+    if (ok) {
+      setEditingId(null);
+      loadPrompts();
     }
   }
 
@@ -129,14 +129,10 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
   async function deletePrompt(id: string) {
     if (!confirm('Supprimer ce prompt ?')) return;
     
-    try {
-      const res = await fetch('/api/prompts?id=' + id, { method: 'DELETE' });
-      if (res.ok) {
-        loadPrompts();
-        loadStats();
-      }
-    } catch (err) {
-      console.error('Erreur suppression:', err);
+    const { ok } = await safeFetch('/api/prompts?id=' + id, { method: 'DELETE' });
+    if (ok) {
+      loadPrompts();
+      loadStats();
     }
   }
 
@@ -148,21 +144,17 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
     
     const brandName = prompts.length > 0 ? prompts[0].brand : 'Ma Marque';
     
-    try {
-      const res = await fetch('/api/prompts/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...newPrompt, brand: brandName }),
-      });
-      
-      if (res.ok) {
-        setShowAddModal(false);
-        setNewPrompt({ prompt: '', format: '9:16', type: 'photo', angle: '', concept: '', product_group: '' });
-        loadPrompts();
-        loadStats();
-      }
-    } catch (err) {
-      console.error('Erreur ajout:', err);
+    const { ok } = await safeFetch('/api/prompts/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...newPrompt, brand: brandName }),
+    });
+    
+    if (ok) {
+      setShowAddModal(false);
+      setNewPrompt({ prompt: '', format: '9:16', type: 'photo', angle: '', concept: '', product_group: '' });
+      loadPrompts();
+      loadStats();
     }
   }
 
@@ -170,7 +162,7 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
     if (!confirm('Supprimer TOUS les prompts ? Cette action est irréversible !')) return;
     
     for (const p of prompts) {
-      await fetch('/api/prompts?id=' + p.id, { method: 'DELETE' });
+      await safeFetch('/api/prompts?id=' + p.id, { method: 'DELETE' });
     }
     loadPrompts();
     loadStats();
@@ -185,34 +177,29 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
     setImporting(true);
     const brandName = prompts.length > 0 ? prompts[0].brand : 'Ma Marque';
     
-    // Sépare par ligne, filtre les lignes vides
     const lines = importText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     
     let successCount = 0;
     let errorCount = 0;
 
     for (const line of lines) {
-      try {
-        const res = await fetch('/api/prompts/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: line,
-            format: importFormat,
-            type: importType,
-            product_group: importProductGroup || null,
-            brand: brandName,
-            angle: '',
-            concept: '',
-          }),
-        });
-        
-        if (res.ok) {
-          successCount++;
-        } else {
-          errorCount++;
-        }
-      } catch (err) {
+      const { ok } = await safeFetch('/api/prompts/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: line,
+          format: importFormat,
+          type: importType,
+          product_group: importProductGroup || null,
+          brand: brandName,
+          angle: '',
+          concept: '',
+        }),
+      });
+      
+      if (ok) {
+        successCount++;
+      } else {
         errorCount++;
       }
     }
@@ -221,7 +208,7 @@ const PromptsTable = forwardRef<PromptsTableRef, PromptsTableProps>(({ productGr
     setShowImportModal(false);
     setImportText('');
     
-    alert(`✅ ${successCount} prompt(s) importé(s)${errorCount > 0 ? `\n❌ ${errorCount} erreur(s)` : ''}`);
+    alert(`✅ ${successCount} prompt(s) importé(s)${errorCount > 0 ? `\n⚠️ ${errorCount} n'ont pas pu être importé(s)` : ''}`);
     
     loadPrompts();
     loadStats();
