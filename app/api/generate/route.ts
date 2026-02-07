@@ -191,7 +191,7 @@ async function generateVideoWithVeo(
       throw new Error(`Timeout polling Veo | operation:${operation.name}`);
 
     } catch (error: any) {
-      if (error.message.includes('Timeout polling')) {
+      if (error.message.includes('Timeout polling') || error.message.includes('bloqué par le filtre')) {
         throw error;
       }
       if (attempt === retries) throw error;
@@ -629,12 +629,23 @@ export async function POST(request: Request) {
           }
         } catch (klingError: any) {
           console.error('❌ [Kling] Erreur:', klingError.message);
-          // Fallback to Veo if Kling fails
-          console.log('🔄 Fallback vers Veo...');
+          
+          // Pas de fallback — remonter l'erreur directement
+          await getSupabase()
+            .from('prompts')
+            .update({ status: 'error', image_url: `Kling: ${klingError.message.substring(0, 100)}` })
+            .eq('id', promptRow.id);
+
+          return NextResponse.json({
+            success: false,
+            error: `❌ Kling: ${klingError.message}`,
+            remaining: remainingCount,
+          });
         }
       }
       
-      // ---- VEO (default or fallback) ----
+      // ---- VEO (seulement si sélectionné) ----
+      if (engine === 'veo') {
       try {
         const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
 
@@ -655,6 +666,20 @@ export async function POST(request: Request) {
           remaining: remainingCount,
         });
       } catch (videoError: any) {
+        // Filtre RAI — marquer le prompt en erreur et continuer
+        if (videoError.message?.includes('bloqué par le filtre')) {
+          await getSupabase()
+            .from('prompts')
+            .update({ status: 'error', image_url: 'Bloqué par filtre sécurité Google' })
+            .eq('id', promptRow.id);
+
+          return NextResponse.json({
+            success: false,
+            error: '🚫 Ce prompt a été bloqué par le filtre de sécurité Google. Il a été marqué en erreur, relance pour passer au suivant.',
+            remaining: remainingCount,
+          });
+        }
+
         const opMatch = videoError.message?.match(/operation:(.+)/);
         if (opMatch) {
           const operationName = opMatch[1];
@@ -679,6 +704,7 @@ export async function POST(request: Request) {
         }
         throw videoError;
       }
+      } // fin if (engine === 'veo')
     }
 
     // ============================================================
