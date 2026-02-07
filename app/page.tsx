@@ -39,6 +39,7 @@ export default function Home() {
   const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string } | null>(null);
   const [includeText, setIncludeText] = useState(true);
   const [includeLogo, setIncludeLogo] = useState(false);
+  const [videoEngine, setVideoEngine] = useState<'veo' | 'kling'>('veo');
 
   const isGeneratingRef = useRef(false);
   const autoModeRef = useRef(false);
@@ -121,7 +122,9 @@ export default function Home() {
   useEffect(() => {
     if (!videoPolling) return;
     localStorage.setItem('videoPolling', JSON.stringify(videoPolling));
-    addLog(`🎬 Vidéo en cours de génération…`);
+    const isKling = videoPolling.operation.startsWith('kling:');
+    const engineLabel = isKling ? 'Kling' : 'Veo';
+    addLog(`🎬 Vidéo ${engineLabel} en cours de génération…`);
     let stopped = false;
     let retryCount = 0;
     const maxRetries = 30; // ~6 min max de polling
@@ -129,7 +132,15 @@ export default function Home() {
     const pollOnce = async () => {
       if (stopped) return;
       
-      const { ok, data } = await safeFetch(`/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}`);
+      let pollUrl: string;
+      if (isKling) {
+        const taskId = videoPolling.operation.replace('kling:', '');
+        pollUrl = `/api/kling-poll?taskId=${encodeURIComponent(taskId)}`;
+      } else {
+        pollUrl = `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}`;
+      }
+      
+      const { ok, data } = await safeFetch(pollUrl);
       
       if (!ok && !data.pending) {
         retryCount++;
@@ -137,14 +148,14 @@ export default function Home() {
           setTimeout(pollOnce, 15000);
           return;
         }
-        addLog('⚠️ La vidéo prend trop de temps, réessaie plus tard.');
+        addLog(`⚠️ La vidéo ${engineLabel} prend trop de temps, réessaie plus tard.`);
         setVideoPolling(null);
         localStorage.removeItem('videoPolling');
         return;
       }
       
       if (data.success && data.done && data.videoUri) {
-        addLog('✅ Vidéo générée avec succès !');
+        addLog(`✅ Vidéo ${engineLabel} générée avec succès !`);
         setCurrentImage(data.videoUri);
         setCurrentPrompt(videoPolling.prompt);
         const newImage = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
@@ -163,13 +174,14 @@ export default function Home() {
         loadStats();
       } else if (data.pending) {
         retryCount = 0;
-        setTimeout(pollOnce, 12000);
+        const pollInterval = isKling ? 10000 : 12000; // Kling is a bit faster
+        setTimeout(pollOnce, pollInterval);
       } else {
         retryCount++;
         if (retryCount < maxRetries) {
           setTimeout(pollOnce, 15000);
         } else {
-          addLog('⚠️ La vidéo n\'a pas pu être générée.');
+          addLog(`⚠️ La vidéo ${engineLabel} n'a pas pu être générée.`);
           setVideoPolling(null);
           localStorage.removeItem('videoPolling');
         }
@@ -262,7 +274,7 @@ export default function Home() {
       const { ok, data } = await safeFetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'single', productGroups: limitedGroups, brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type })), includeText, includeLogo }),
+        body: JSON.stringify({ mode: 'single', productGroups: limitedGroups, brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type })), includeText, includeLogo, videoEngine }),
       });
       
       if (!ok) {
@@ -580,7 +592,7 @@ export default function Home() {
         </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="flex gap-4 mb-4">
+          <div className="flex gap-4 mb-4 flex-wrap">
             <label className="flex items-center gap-2 cursor-pointer select-none bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 hover:border-blue-400 transition-colors">
               <input type="checkbox" checked={includeText} onChange={(e) => setIncludeText(e.target.checked)} className="w-5 h-5 rounded accent-blue-600" />
               <span className="font-medium text-gray-700">✍️ Avec texte</span>
@@ -589,6 +601,21 @@ export default function Home() {
               <input type="checkbox" checked={includeLogo} onChange={(e) => setIncludeLogo(e.target.checked)} className="w-5 h-5 rounded accent-blue-600" />
               <span className="font-medium text-gray-700">🏷️ Avec logo</span>
             </label>
+            <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">
+              <span className="font-medium text-gray-700">🎬 Moteur vidéo:</span>
+              <button
+                onClick={() => setVideoEngine('veo')}
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+              >
+                Veo 3.1
+              </button>
+              <button
+                onClick={() => setVideoEngine('kling')}
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+              >
+                Kling v3
+              </button>
+            </div>
           </div>
           <div className="flex gap-4 mb-4">
             <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-5 rounded-xl font-bold text-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shadow-lg">
@@ -608,7 +635,7 @@ export default function Home() {
             </div>
           )}
           {autoMode && !error && <div className="mt-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg text-green-700 font-medium animate-pulse">🤖 Mode auto actif</div>}
-          {videoPolling && <div className="mt-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg text-blue-700 font-medium animate-pulse">🎬 Vidéo en cours de création…</div>}
+          {videoPolling && <div className="mt-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg text-blue-700 font-medium animate-pulse">🎬 Vidéo {videoPolling.operation.startsWith('kling:') ? 'Kling' : 'Veo'} en cours de création…</div>}
         </div>
 
         <div className="grid grid-cols-2 gap-6">
