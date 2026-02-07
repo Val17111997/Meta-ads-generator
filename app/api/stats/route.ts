@@ -9,19 +9,16 @@ export async function GET() {
   
   const supabase = createClient(url, key);
 
-  // Test simple : récupère toutes les lignes
-  const { data, error } = await supabase
-    .from('prompts')
-    .select('id');
+  // Total
+  const { data: allData } = await supabase.from('prompts').select('id, status');
+  
+  const total = allData?.length || 0;
+  const remaining = allData?.filter(p => p.status === 'pending').length || 0;
+  const generated = allData?.filter(p => p.status === 'generated').length || 0;
 
   return NextResponse.json({
-    total: data?.length || 0,
-    remaining: 0,
-    generated: 0,
-    debug: {
-      dataLength: data?.length,
-      error: error?.message,
-      firstItem: data?.[0],
-    }
+    total,
+    remaining,
+    generated,
   });
 }
