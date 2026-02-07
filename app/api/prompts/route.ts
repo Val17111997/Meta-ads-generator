@@ -36,31 +36,18 @@ export async function GET(request: Request) {
       throw new Error(error.message);
     }
     
-    // Stats
-    const { count: totalCount } = await supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('brand', brand || '');
-    
-    const { count: pendingCount } = await supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('brand', brand || '')
-      .eq('status', 'pending');
-    
-    const { count: generatedCount } = await supabase
-      .from('prompts')
-      .select('*', { count: 'exact', head: true })
-      .eq('brand', brand || '')
-      .eq('status', 'generated');
+    // Stats calculées à partir des données
+    const total = data?.length || 0;
+    const pending = data?.filter(p => p.status === 'pending').length || 0;
+    const generated = data?.filter(p => p.status === 'generated').length || 0;
     
     return NextResponse.json({
       success: true,
       prompts: data,
       stats: {
-        total: brand ? totalCount : data?.length || 0,
-        pending: brand ? pendingCount : 0,
-        generated: brand ? generatedCount : 0,
+        total,
+        pending,
+        generated,
       }
     });
     
