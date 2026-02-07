@@ -143,7 +143,21 @@ export default function Home() {
       
       const { ok, data } = await safeFetch(pollUrl);
       
-      if (!ok && !data.pending) {
+      // Erreur définitive (filtre sécurité, opération expirée, etc.) → arrêter immédiatement
+      if (!ok || (data.success === false && data.error)) {
+        const errorMsg = data.error || 'Erreur inconnue';
+        const isDefinitive = errorMsg.includes('bloqué') || errorMsg.includes('sécurité') || 
+                             errorMsg.includes('expirée') || errorMsg.includes('introuvable') ||
+                             errorMsg.includes('safety') || errorMsg.includes('filtered');
+        
+        if (isDefinitive) {
+          addLog(`❌ ${errorMsg}`);
+          setVideoPolling(null);
+          localStorage.removeItem('videoPolling');
+          return;
+        }
+        
+        // Erreur temporaire → retry avec limite
         retryCount++;
         if (retryCount < maxRetries) {
           setTimeout(pollOnce, 15000);
