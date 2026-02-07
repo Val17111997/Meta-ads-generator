@@ -671,7 +671,7 @@ export default function Home() {
                 onClick={() => setVideoEngine('kling')}
                 className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
               >
-                Kling v3
+                Kling 2.6
               </button>
             </div>
           </div>

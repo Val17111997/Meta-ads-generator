@@ -156,9 +156,14 @@ async function generateVideoWithVeo(
             updatedOp.response?.videos?.[0]?.uri;
 
           if (!videoUri) {
-            // Structure inattendue — logger pour debug mais ne pas crasher
+            // Vérifier si c'est un blocage RAI (filtre de sécurité Google)
+            const raiReasons = updatedOp.response?.generateVideoResponse?.raiMediaFilteredReasons;
+            if (raiReasons && raiReasons.length > 0) {
+              console.error('🚫 Veo: prompt bloqué par filtre sécurité:', raiReasons[0]);
+              throw new Error(`Veo: prompt bloqué par le filtre de sécurité Google. Modifie le prompt et réessaie.`);
+            }
+            // Structure inattendue — logger pour debug mais continuer
             console.warn('⚠️ Veo done mais structure réponse inattendue:', JSON.stringify(updatedOp.response || updatedOp).substring(0, 500));
-            // Continuer le polling au cas où la réponse arrive dans un format différent plus tard
             continue;
           }
 
@@ -341,7 +346,7 @@ async function generateKlingJWT(): Promise<string> {
 }
 
 // ============================================================
-// GÉNÉRATION VIDÉO avec Kling v3 — image-to-video
+// GÉNÉRATION VIDÉO avec Kling 2.6 — image-to-video
 // ============================================================
 async function generateVideoWithKling(
   prompt: string,
@@ -370,10 +375,10 @@ async function generateVideoWithKling(
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const token = await generateKlingJWT();
-      console.log(`🎬 [Kling v3] Tentative ${attempt}/${retries}`);
+      console.log(`🎬 [Kling 2.6] Tentative ${attempt}/${retries}`);
 
       const requestBody: any = {
-        model_name: 'kling-v3',
+        model_name: 'kling-v2-6',
         prompt: prompt,
         image: klingImage,
         cfg_scale: 0.5,
