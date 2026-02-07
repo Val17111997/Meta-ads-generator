@@ -9,7 +9,7 @@ export async function GET() {
   
   const supabase = createClient(url, key);
 
-  const { data, error } = await supabase.from('prompts').select('id, status');
+  const { data } = await supabase.from('prompts').select('id, status');
   
   return NextResponse.json({
     total: data?.length || 0,
