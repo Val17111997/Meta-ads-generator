@@ -29,15 +29,6 @@ export async function GET(request: Request) {
 
   const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-  // ──────────────────────────────────────────────────────
-  // POINT CLEF : l'URL de polling doit être exactement
-  //   ${BASE_URL}/${operation_name}
-  // avec ?key= comme query param (plus fiable que le header
-  // pour les opérations long-running sur Gemini API).
-  //
-  // operation_name ressemble à :
-  //   "models/veo-3.1-generate-preview/operations/abc123"
-  // ──────────────────────────────────────────────────────
   const pollUrl = `${BASE_URL}/${operationName}?key=${apiKey}`;
 
   console.log('🔍 Polling URL:', pollUrl.replace(apiKey, 'KEY_REDACTED'));
@@ -47,17 +38,14 @@ export async function GET(request: Request) {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        // On garde aussi le header — belt & suspenders
         'x-goog-api-key': apiKey,
       },
-      // Crucial : pas de cache
       cache: 'no-store',
     });
 
     console.log('📊 Poll status HTTP:', response.status);
 
     if (response.status === 429) {
-      // Rate limit — on retourne "pending" pour qu'il réessaie
       console.log('⚠️ Rate limit sur le polling, retry...');
       return NextResponse.json({ success: true, pending: true });
     }
@@ -66,7 +54,6 @@ export async function GET(request: Request) {
       const errorText = await response.text();
       console.error('❌ Erreur polling HTTP', response.status, ':', errorText.substring(0, 300));
       
-      // Si c'est un 404, l'opération n'existe plus (expirée après 2 jours)
       if (response.status === 404) {
         return NextResponse.json({ success: false, error: 'Opération expirée ou introuvable (404). Regénère la vidéo.' });
       }
@@ -93,12 +80,19 @@ export async function GET(request: Request) {
       });
     }
 
+    // ── done: true — vérifier le filtre RAI (sécurité Google) ──
+    const raiReasons = data.response?.generateVideoResponse?.raiMediaFilteredReasons;
+    if (raiReasons && raiReasons.length > 0) {
+      console.error('🚫 Veo: prompt bloqué par filtre sécurité:', raiReasons[0]);
+      return NextResponse.json({
+        success: false,
+        error: '🚫 Prompt bloqué par le filtre de sécurité Google. Modifie le prompt et réessaie.',
+      });
+    }
+
     // ── done: true — extraire l'URI de la vidéo ──
-    // Structure officielle (docs Google REST) :
-    //   response.generateVideoResponse.generatedSamples[0].video.uri
     const videoUri =
       data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
-      // Fallbacks au cas où Google change la structure :
       data.response?.generatedVideos?.[0]?.video?.uri ||
       data.response?.videos?.[0]?.uri;
 
@@ -113,8 +107,6 @@ export async function GET(request: Request) {
     console.log('✅ Vidéo prête ! URI:', videoUri.substring(0, 80) + '...');
 
     // ── Proxy : télécharger la vidéo côté serveur ──
-    // L'URI Veo nécessite x-goog-api-key et des redirects.
-    // Le browser ne peut pas ça directement (CORS).
     try {
       const videoRes = await fetch(videoUri, {
         headers: { 'x-goog-api-key': apiKey },
@@ -138,7 +130,7 @@ export async function GET(request: Request) {
         return NextResponse.json({
           success: true,
           done: true,
-          videoUri: videoUri, // Le frontend devra gérer cette URL
+          videoUri: videoUri,
         });
       }
     } catch (dlErr: any) {
