@@ -4,10 +4,12 @@ import { createClient } from '@supabase/supabase-js';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+}
 
 // ============================================================
 // GÉNÉRATION VIDÉO avec Veo — predictLongRunning + polling
@@ -335,7 +337,7 @@ export async function POST(request: Request) {
     }
     
     // Récupérer les prompts en attente depuis Supabase
-    const { data: pendingPrompts, error: fetchError } = await supabase
+    const { data: pendingPrompts, error: fetchError } = await getSupabase()
       .from('prompts')
       .select('*')
       .eq('status', 'pending')
@@ -406,7 +408,7 @@ export async function POST(request: Request) {
     }
     
     // Compter les prompts restants
-    const { data: allPending } = await supabase
+    const { data: allPending } = await getSupabase()
       .from('prompts')
       .select('id')
       .eq('status', 'pending');
@@ -422,7 +424,7 @@ export async function POST(request: Request) {
         const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
 
         // Mise à jour Supabase
-        await supabase
+        await getSupabase()
           .from('prompts')
           .update({ 
             status: 'generated',
@@ -442,7 +444,7 @@ export async function POST(request: Request) {
         if (opMatch) {
           const operationName = opMatch[1];
           
-          await supabase
+          await getSupabase()
             .from('prompts')
             .update({ 
               status: 'generating',
@@ -477,7 +479,7 @@ export async function POST(request: Request) {
     );
     
     // Mise à jour Supabase
-    await supabase
+    await getSupabase()
       .from('prompts')
       .update({ 
         status: 'generated',

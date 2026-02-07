@@ -3,52 +3,33 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_KEY!
+  );
+}
 
-// GET - Récupérer les prompts (avec filtres optionnels)
-export async function GET(request: Request) {
+// GET - Récupérer les prompts via RPC
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const brand = searchParams.get('brand');
-    const status = searchParams.get('status');
-    const limit = parseInt(searchParams.get('limit') || '100');
+    const supabase = getSupabase();
     
-    let query = supabase
-      .from('prompts')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    
-    if (brand) {
-      query = query.eq('brand', brand);
-    }
-    
-    if (status) {
-      query = query.eq('status', status);
-    }
-    
-    const { data, error } = await query;
+    const { data: prompts, error } = await supabase.rpc('get_all_prompts');
     
     if (error) {
       throw new Error(error.message);
     }
     
-    // Stats calculées à partir des données
-    const total = data?.length || 0;
-    const pending = data?.filter(p => p.status === 'pending').length || 0;
-    const generated = data?.filter(p => p.status === 'generated').length || 0;
+    // Calculer les stats à partir des données
+    const total = prompts?.length || 0;
+    const pending = prompts?.filter((p: any) => p.status === 'pending').length || 0;
+    const generated = prompts?.filter((p: any) => p.status === 'generated').length || 0;
     
     return NextResponse.json({
       success: true,
-      prompts: data,
-      stats: {
-        total,
-        pending,
-        generated,
-      }
+      prompts: prompts || [],
+      stats: { total, pending, generated }
     });
     
   } catch (error: unknown) {
@@ -60,11 +41,12 @@ export async function GET(request: Request) {
   }
 }
 
-// PATCH - Mettre à jour un prompt (status, image_url, etc.)
+// PATCH - Mettre à jour un prompt
 export async function PATCH(request: Request) {
   try {
+    const supabase = getSupabase();
     const body = await request.json();
-    const { id, status, image_url } = body;
+    const { id, ...updates } = body;
     
     if (!id) {
       return NextResponse.json({
@@ -72,10 +54,6 @@ export async function PATCH(request: Request) {
         error: 'ID du prompt requis'
       }, { status: 400 });
     }
-    
-    const updates: Record<string, string> = {};
-    if (status) updates.status = status;
-    if (image_url) updates.image_url = image_url;
     
     const { data, error } = await supabase
       .from('prompts')
@@ -105,25 +83,9 @@ export async function PATCH(request: Request) {
 // DELETE - Supprimer un prompt
 export async function DELETE(request: Request) {
   try {
+    const supabase = getSupabase();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    const brand = searchParams.get('brand');
-    const deleteAll = searchParams.get('deleteAll') === 'true';
-    
-    if (deleteAll && brand) {
-      // Supprimer tous les prompts d'une marque
-      const { error } = await supabase
-        .from('prompts')
-        .delete()
-        .eq('brand', brand);
-      
-      if (error) throw new Error(error.message);
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Tous les prompts de ' + brand + ' supprimés'
-      });
-    }
     
     if (!id) {
       return NextResponse.json({
