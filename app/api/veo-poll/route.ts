@@ -15,13 +15,15 @@ export const revalidate = 0;
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const operationName = url.searchParams.get('operation');
+  const keyIndexParam = url.searchParams.get('keyIndex');
 
   if (!operationName) {
     return NextResponse.json({ success: false, error: 'Paramètre "operation" manquant' }, { status: 400 });
   }
 
   const apiKeys = (process.env.GOOGLE_API_KEY || '').split(',');
-  const apiKey = apiKeys[0]?.trim();
+  const keyIndex = keyIndexParam ? parseInt(keyIndexParam) : 0;
+  const apiKey = apiKeys[keyIndex % apiKeys.length]?.trim();
 
   if (!apiKey) {
     return NextResponse.json({ success: false, error: 'GOOGLE_API_KEY non configurée' }, { status: 500 });

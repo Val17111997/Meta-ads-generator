@@ -36,7 +36,7 @@ export default function Home() {
   const [uploadingBrand, setUploadingBrand] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
-  const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string } | null>(null);
+  const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string; keyIndex?: number } | null>(null);
   const [includeText, setIncludeText] = useState(true);
   const [includeLogo, setIncludeLogo] = useState(false);
   const [videoEngine, setVideoEngine] = useState<'veo' | 'kling'>('veo');
@@ -138,7 +138,7 @@ export default function Home() {
         const taskId = videoPolling.operation.replace('kling:', '');
         pollUrl = `/api/kling-poll?taskId=${encodeURIComponent(taskId)}`;
       } else {
-        pollUrl = `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}`;
+        pollUrl = `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}&keyIndex=${videoPolling.keyIndex || 0}`;
       }
       
       const { ok, data } = await safeFetch(pollUrl);
@@ -308,7 +308,7 @@ export default function Home() {
       if (data.success) {
         if (data.videoOperation && !data.imageUrl) {
           addLog(`🎬 Vidéo en cours de création…`);
-          setVideoPolling({ operation: data.videoOperation, prompt: data.prompt });
+          setVideoPolling({ operation: data.videoOperation, prompt: data.prompt, keyIndex: data.videoKeyIndex || 0 });
         } else {
           const newImage = { url: data.imageUrl, prompt: data.prompt, timestamp: Date.now(), mediaType: data.mediaType || 'image' };
           setCurrentImage(data.imageUrl);

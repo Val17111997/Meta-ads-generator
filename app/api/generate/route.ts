@@ -187,8 +187,8 @@ async function generateVideoWithVeo(
         }
       }
 
-      console.log('⏰ Timeout polling après 40s. Operation:', operation.name);
-      throw new Error(`Timeout polling Veo | operation:${operation.name}`);
+      console.log('⏰ Timeout polling après 40s. Operation:', operation.name, 'keyIndex:', currentKeyIndex);
+      throw new Error(`Timeout polling Veo | operation:${operation.name} | keyIndex:${currentKeyIndex % apiKeys.length}`);
 
     } catch (error: any) {
       if (error.message.includes('Timeout polling') || error.message.includes('bloqué par le filtre')) {
@@ -680,9 +680,14 @@ export async function POST(request: Request) {
           });
         }
 
-        const opMatch = videoError.message?.match(/operation:(.+)/);
+        const opMatch = videoError.message?.match(/operation:(.+?)(?:\s*\|.*)?$/);
         if (opMatch) {
-          const operationName = opMatch[1];
+          const fullMatch = opMatch[1].trim();
+          // Extraire le keyIndex s'il est présent
+          const keyIndexMatch = videoError.message?.match(/keyIndex:(\d+)/);
+          const keyIndex = keyIndexMatch ? parseInt(keyIndexMatch[1]) : 0;
+          // operationName sans le keyIndex
+          const operationName = fullMatch.replace(/\s*\|.*$/, '').trim();
           
           await getSupabase()
             .from('prompts')
@@ -696,6 +701,7 @@ export async function POST(request: Request) {
             success: true,
             mediaType: 'video',
             videoOperation: operationName,
+            videoKeyIndex: keyIndex,
             imageUrl: null,
             prompt,
             remaining: remainingCount,
