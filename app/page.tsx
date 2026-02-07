@@ -22,6 +22,8 @@ export default function Home() {
   const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
   const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string } | null>(null);
+  const [includeText, setIncludeText] = useState(true);
+  const [includeLogo, setIncludeLogo] = useState(false);
 
   const isGeneratingRef = useRef(false);
   const autoModeRef = useRef(false);
@@ -210,7 +212,7 @@ export default function Home() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'single', productGroups: limitedGroups, brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type })) }),
+        body: JSON.stringify({ mode: 'single', productGroups: limitedGroups, brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type })), includeText, includeLogo }),
       });
       
       const data = await response.json();
@@ -511,6 +513,16 @@ export default function Home() {
         </div>
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <div className="flex gap-4 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer select-none bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 hover:border-blue-400 transition-colors">
+              <input type="checkbox" checked={includeText} onChange={(e) => setIncludeText(e.target.checked)} className="w-5 h-5 rounded accent-blue-600" />
+              <span className="font-medium text-gray-700">✍️ Avec texte</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 hover:border-blue-400 transition-colors">
+              <input type="checkbox" checked={includeLogo} onChange={(e) => setIncludeLogo(e.target.checked)} className="w-5 h-5 rounded accent-blue-600" />
+              <span className="font-medium text-gray-700">🏷️ Avec logo</span>
+            </label>
+          </div>
           <div className="flex gap-4 mb-4">
             <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-5 rounded-xl font-bold text-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shadow-lg">
               {isGenerating ? <span className="flex items-center justify-center gap-3"><span className="animate-spin">⏳</span> Génération...</span> : '🎯 Générer'}

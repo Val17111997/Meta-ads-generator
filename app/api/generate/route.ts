@@ -324,7 +324,7 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH.`
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { productGroups = {}, brandAssets = [] } = body;
+    const { productGroups = {}, brandAssets = [], includeText = true, includeLogo = false } = body;
     
     if (!process.env.GOOGLE_API_KEY) {
       return NextResponse.json({ 
@@ -372,6 +372,7 @@ export async function POST(request: Request) {
     
     console.log(`📝 Prompt: ${prompt.substring(0, 50)}...`);
     console.log(`📐 Format: ${format}, Type: ${contentType}`);
+    console.log(`✍️ Texte: ${includeText ? 'OUI' : 'NON'}, 🏷️ Logo: ${includeLogo ? 'OUI' : 'NON'}`);
     
     // Sélection des images produit
     let selectedImages: string[] = [];
@@ -478,8 +479,8 @@ export async function POST(request: Request) {
       prompt, 
       selectedImages, 
       brandAssets, 
-      false, // shouldIncludeLogo
-      true,  // shouldIncludeText
+      includeLogo,
+      includeText,
       format
     );
     
