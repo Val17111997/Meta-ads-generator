@@ -23,18 +23,20 @@ async function generateVideoWithVeo(
   prompt: string,
   format: string = '9:16',
   referenceImages: string[] = [],
-  retries = 3
 ): Promise<string | null> {
-  const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
-  let currentKeyIndex = 0;
+  const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim()).filter(Boolean);
+  const maxAttempts = apiKeys.length; // Tester CHAQUE clé une fois
+  const startIndex = Math.floor(Math.random() * apiKeys.length); // Round-robin distribué
 
   const aspectRatio = (format === '16:9' || format === '9:16') ? format : '9:16';
   const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const keyIndex = (startIndex + attempt) % apiKeys.length;
+    const apiKey = apiKeys[keyIndex];
+
     try {
-      const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
-      console.log(`🎬 Tentative vidéo ${attempt}/${retries} (clé #${(currentKeyIndex % apiKeys.length) + 1})`);
+      console.log(`🎬 Tentative vidéo ${attempt + 1}/${maxAttempts} (clé #${keyIndex + 1}/${apiKeys.length})`);
 
       const startUrl = `${BASE_URL}/models/veo-3.1-generate-preview:predictLongRunning?key=${apiKey}`;
       
@@ -86,18 +88,17 @@ async function generateVideoWithVeo(
         body: JSON.stringify(requestBody)
       });
 
-      console.log('📊 Status démarrage:', startResponse.status);
+      console.log(`📊 Status démarrage: ${startResponse.status} (clé #${keyIndex + 1})`);
 
       if (startResponse.status === 429) {
-        console.log('⚠️ Rate limit (429), on change de clé...');
-        currentKeyIndex++;
-        await new Promise(r => setTimeout(r, 3000));
+        console.log(`⚠️ Rate limit (429) sur clé #${keyIndex + 1}, passage à la suivante...`);
+        await new Promise(r => setTimeout(r, 1000));
         continue;
       }
 
       if (startResponse.status === 503) {
         console.log('⚠️ Serveur surchargé (503), retry...');
-        await new Promise(r => setTimeout(r, attempt * 3000));
+        await new Promise(r => setTimeout(r, 3000));
         continue;
       }
 
@@ -119,7 +120,7 @@ async function generateVideoWithVeo(
         throw new Error('Pas de operation name retourné par Veo');
       }
 
-      console.log('✅ Opération Veo démarrée:', operation.name);
+      console.log('✅ Opération Veo démarrée:', operation.name, `(clé #${keyIndex + 1})`);
 
       // Polling inline (4 × 10s = 40s max)
       const maxPolls = 4;
@@ -156,13 +157,11 @@ async function generateVideoWithVeo(
             updatedOp.response?.videos?.[0]?.uri;
 
           if (!videoUri) {
-            // Vérifier si c'est un blocage RAI (filtre de sécurité Google)
             const raiReasons = updatedOp.response?.generateVideoResponse?.raiMediaFilteredReasons;
             if (raiReasons && raiReasons.length > 0) {
               console.error('🚫 Veo: prompt bloqué par filtre sécurité:', raiReasons[0]);
               throw new Error(`Veo: prompt bloqué par le filtre de sécurité Google. Modifie le prompt et réessaie.`);
             }
-            // Structure inattendue — logger pour debug mais continuer
             console.warn('⚠️ Veo done mais structure réponse inattendue:', JSON.stringify(updatedOp.response || updatedOp).substring(0, 500));
             continue;
           }
@@ -187,19 +186,19 @@ async function generateVideoWithVeo(
         }
       }
 
-      console.log('⏰ Timeout polling après 40s. Operation:', operation.name, 'keyIndex:', currentKeyIndex);
-      throw new Error(`Timeout polling Veo | operation:${operation.name} | keyIndex:${currentKeyIndex % apiKeys.length}`);
+      console.log('⏰ Timeout polling après 40s. Operation:', operation.name, `keyIndex: ${keyIndex}`);
+      throw new Error(`Timeout polling Veo | operation:${operation.name} | keyIndex:${keyIndex}`);
 
     } catch (error: any) {
       if (error.message.includes('Timeout polling') || error.message.includes('bloqué par le filtre')) {
         throw error;
       }
-      if (attempt === retries) throw error;
+      if (attempt === maxAttempts - 1) throw error;
       await new Promise(r => setTimeout(r, 2000));
     }
   }
 
-  throw new Error('Échec génération vidéo après toutes les tentatives');
+  throw new Error('Échec génération vidéo après toutes les clés');
 }
 
 // ============================================================
@@ -212,10 +211,10 @@ async function generateWithProductImage(
   shouldIncludeLogo: boolean = false,
   shouldIncludeText: boolean = true,
   format: string = '1:1', 
-  retries = 5
 ) {
-  const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim());
-  let currentKeyIndex = 0;
+  const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim()).filter(Boolean);
+  const maxAttempts = Math.max(apiKeys.length, 5); // Au moins 5 tentatives (503 sont temporaires)
+  const startIndex = Math.floor(Math.random() * apiKeys.length);
   
   const productParts = productImagesBase64.map(imgBase64 => {
     const base64Data = imgBase64.split(',')[1] || imgBase64;
@@ -255,10 +254,11 @@ async function generateWithProductImage(
     if (hasStyle) brandInstructions += '\n- Visual style references provided: Match the aesthetic feel.';
   }
   
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const keyIndex = (startIndex + attempt) % apiKeys.length;
+    const apiKey = apiKeys[keyIndex];
+
     try {
-      const apiKey = apiKeys[currentKeyIndex % apiKeys.length];
-      
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${apiKey}`,
         {
@@ -295,8 +295,8 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH.`
       );
 
       if (response.status === 503 || response.status === 429) {
-        currentKeyIndex++;
-        await new Promise(resolve => setTimeout(resolve, attempt * 3000));
+        console.log(`⚠️ Image: ${response.status} sur clé #${keyIndex + 1}, passage à la suivante...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
         continue;
       }
 
@@ -319,11 +319,11 @@ ALL TEXT IN THE IMAGE MUST BE IN FRENCH.`
       return `data:image/png;base64,${imagePart.inlineData.data}`;
       
     } catch (error: any) {
-      if (attempt === retries) throw error;
+      if (attempt === maxAttempts - 1) throw error;
     }
   }
   
-  throw new Error('Échec après plusieurs tentatives');
+  throw new Error('Échec après toutes les clés');
 }
 
 // ============================================================
@@ -356,20 +356,18 @@ async function generateVideoWithKling(
 ): Promise<{ videoUri?: string; taskId?: string; pending?: boolean }> {
   const aspectRatio = (format === '16:9' || format === '9:16' || format === '1:1') ? format : '9:16';
   
-  // Use first image as the source for image-to-video
   const imageUrl = referenceImages.length > 0 ? referenceImages[0] : null;
   if (!imageUrl) throw new Error('Kling image-to-video nécessite au moins une image');
 
-  // Kling accepte soit une URL HTTP, soit du base64 BRUT (sans préfixe data:)
   let klingImage: string;
   if (imageUrl.startsWith('data:')) {
     const base64Part = imageUrl.split(',')[1];
     if (!base64Part || base64Part.length < 100) {
       throw new Error('Image base64 invalide ou trop petite');
     }
-    klingImage = base64Part; // Base64 brut, sans le préfixe data:image/...
+    klingImage = base64Part;
   } else {
-    klingImage = imageUrl; // URL HTTP directe
+    klingImage = imageUrl;
   }
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -415,7 +413,6 @@ async function generateVideoWithKling(
 
       console.log('✅ [Kling] Tâche créée:', taskId);
 
-      // Quick inline polling (3 × 10s = 30s)
       for (let poll = 1; poll <= 3; poll++) {
         await new Promise(r => setTimeout(r, 10000));
         console.log(`⏳ [Kling] Polling ${poll}/3...`);
@@ -438,7 +435,6 @@ async function generateVideoWithKling(
         if (status === 'succeed') {
           const videoUrl = pollResult.data?.task_result?.videos?.[0]?.url;
           if (videoUrl) {
-            // Try to convert to base64
             try {
               const videoRes = await fetch(videoUrl);
               if (videoRes.ok) {
@@ -457,7 +453,6 @@ async function generateVideoWithKling(
         }
       }
 
-      // Not done yet — return taskId for client-side polling
       console.log('⏰ [Kling] Timeout inline, taskId:', taskId);
       return { taskId, pending: true };
 
@@ -493,6 +488,10 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
 
+    // Log des clés disponibles au démarrage
+    const keyCount = process.env.GOOGLE_API_KEY.split(',').filter(k => k.trim()).length;
+    console.log(`🔑 ${keyCount} clé(s) Google API configurée(s)`);
+
     const totalImages = Object.values(productGroups).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
     if (totalImages === 0) {
       return NextResponse.json({ 
@@ -501,7 +500,6 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
     
-    // Récupérer les prompts en attente depuis Supabase
     const { data: pendingPrompts, error: fetchError } = await getSupabase()
       .from('prompts')
       .select('*')
@@ -535,7 +533,6 @@ export async function POST(request: Request) {
     console.log(`📐 Format: ${format}, Type: ${contentType}`);
     console.log(`✍️ Texte: ${includeText ? 'OUI' : 'NON'}, 🏷️ Logo: ${includeLogo ? 'OUI' : 'NON'}`);
     
-    // Sélection des images produit
     let selectedImages: string[] = [];
     
     if (productName && productGroups[productName]) {
@@ -560,7 +557,6 @@ export async function POST(request: Request) {
       });
     }
     
-    // Validation format
     const validFormats = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
     format = format.replace(/^0+(\d)/, '$1');
     if (!validFormats.includes(format)) {
@@ -574,7 +570,6 @@ export async function POST(request: Request) {
       });
     }
     
-    // Compter les prompts restants
     const { data: allPending } = await getSupabase()
       .from('prompts')
       .select('id')
@@ -589,13 +584,12 @@ export async function POST(request: Request) {
       const engine = videoEngine || 'veo';
       console.log(`🎬 Démarrage génération vidéo avec ${engine.toUpperCase()}...`);
       
-      // ---- KLING v3 ----
+      // ---- KLING ----
       if (engine === 'kling') {
         try {
           const klingResult = await generateVideoWithKling(prompt, format, selectedImages);
 
           if (klingResult.videoUri) {
-            // Vidéo prête immédiatement
             await getSupabase()
               .from('prompts')
               .update({ status: 'generated', image_url: 'Vidéo Kling générée' })
@@ -611,7 +605,6 @@ export async function POST(request: Request) {
           }
 
           if (klingResult.pending && klingResult.taskId) {
-            // Vidéo pas encore prête — polling côté client
             await getSupabase()
               .from('prompts')
               .update({ status: 'generating', image_url: `kling:${klingResult.taskId}` })
@@ -630,7 +623,6 @@ export async function POST(request: Request) {
         } catch (klingError: any) {
           console.error('❌ [Kling] Erreur:', klingError.message);
           
-          // Pas de fallback — remonter l'erreur directement
           await getSupabase()
             .from('prompts')
             .update({ status: 'error', image_url: `Kling: ${klingError.message.substring(0, 100)}` })
@@ -649,7 +641,6 @@ export async function POST(request: Request) {
       try {
         const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
 
-        // Mise à jour Supabase
         await getSupabase()
           .from('prompts')
           .update({ 
@@ -666,7 +657,6 @@ export async function POST(request: Request) {
           remaining: remainingCount,
         });
       } catch (videoError: any) {
-        // Filtre RAI — marquer le prompt en erreur et continuer
         if (videoError.message?.includes('bloqué par le filtre')) {
           await getSupabase()
             .from('prompts')
@@ -683,10 +673,8 @@ export async function POST(request: Request) {
         const opMatch = videoError.message?.match(/operation:(.+?)(?:\s*\|.*)?$/);
         if (opMatch) {
           const fullMatch = opMatch[1].trim();
-          // Extraire le keyIndex s'il est présent
           const keyIndexMatch = videoError.message?.match(/keyIndex:(\d+)/);
           const keyIndex = keyIndexMatch ? parseInt(keyIndexMatch[1]) : 0;
-          // operationName sans le keyIndex
           const operationName = fullMatch.replace(/\s*\|.*$/, '').trim();
           
           await getSupabase()
@@ -725,7 +713,6 @@ export async function POST(request: Request) {
       format
     );
     
-    // Mise à jour Supabase
     await getSupabase()
       .from('prompts')
       .update({ 
