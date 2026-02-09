@@ -209,7 +209,7 @@ export default function Home() {
         <div className="max-w-[1600px] mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 via-blue-500 to-pink-500 flex items-center justify-center"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15l3.5-4.5 2.5 3.01L14.5 9l4.5 6H5z"/></svg></div>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 via-blue-500 to-pink-500 flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-violet-500/30">M</div>
               <span className="text-xl font-bold bg-gradient-to-r from-violet-400 via-blue-400 to-pink-400 bg-clip-text text-transparent">Meta Ads Generator</span>
             </div>
             <div className="flex items-center gap-3">
