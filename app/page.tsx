@@ -197,7 +197,7 @@ export default function Home() {
 
   const totalAssets = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
   const progress = stats.total > 0 ? Math.round((stats.generated/stats.total)*100) : 0;
-  const darkTheme = "[&_.bg-white]:bg-[#1a1a24] [&_.bg-white]:border [&_.bg-white]:border-white/[0.06] [&_.text-gray-600]:text-white/50 [&_.text-gray-700]:text-white/60 [&_.text-gray-800]:text-white/80 [&_.text-gray-500]:text-white/40 [&_.text-gray-400]:text-white/30 [&_.bg-gray-50]:bg-white/[0.03] [&_.bg-gray-100]:bg-white/[0.05] [&_.bg-gray-200]:bg-white/[0.08] [&_.bg-gray-300]:bg-white/10 [&_.border-gray-200]:border-white/[0.06] [&_.border-gray-300]:border-white/10 [&_.shadow-lg]:shadow-none [&_input]:bg-white/5 [&_input]:border-white/10 [&_input]:text-white [&_select]:bg-white/5 [&_select]:text-white [&_.rounded-2xl]:rounded-xl [&_table]:text-white/70 [&_th]:text-white/50 [&_td]:border-white/[0.04]";
+  const darkTheme = "[&_.bg-white]:bg-[#1a1a24] [&_.bg-white]:border [&_.bg-white]:border-white/[0.06] [&_.text-gray-600]:text-white/50 [&_.text-gray-700]:text-white/60 [&_.text-gray-800]:text-white/80 [&_.text-gray-500]:text-white/40 [&_.text-gray-400]:text-white/30 [&_.bg-gray-50]:bg-white/[0.03] [&_.bg-gray-100]:bg-white/[0.05] [&_.bg-gray-200]:bg-white/[0.08] [&_.bg-gray-300]:bg-white/10 [&_.border-gray-200]:border-white/[0.06] [&_.border-gray-300]:border-white/10 [&_.shadow-lg]:shadow-none [&_input]:bg-white/5 [&_input]:border-white/10 [&_input]:text-white [&_select]:bg-white/5 [&_select]:text-white [&_.rounded-2xl]:rounded-xl [&_table]:text-white/70 [&_th]:text-white/50 [&_td]:border-white/[0.04] [&_.text-purple-800]:text-violet-300 [&_.text-purple-700]:text-violet-300/80 [&_.from-purple-50]:from-violet-500/10 [&_.to-indigo-50]:to-blue-500/10 [&_.border-purple-100]:border-violet-500/20 [&_.bg-green-50]:bg-emerald-500/10 [&_.text-green-700]:text-emerald-400 [&_.border-green-200]:border-emerald-500/20 [&_.bg-red-50]:bg-red-500/10 [&_.text-red-700]:text-red-400 [&_.border-red-200]:border-red-500/20 [&_.bg-blue-50]:bg-blue-500/10 [&_.text-blue-700]:text-blue-400 [&_.border-blue-200]:border-blue-500/20 [&_.bg-purple-100]:bg-violet-500/15 [&_.text-purple-700]:text-violet-300 [&_.bg-blue-100]:bg-blue-500/15 [&_.text-blue-700]:text-blue-300 [&_.bg-red-100]:bg-red-500/15 [&_.text-red-700]:text-red-300 [&_.bg-green-100]:bg-emerald-500/15 [&_.text-green-700]:text-emerald-300 [&_.text-purple-500]:text-violet-400 [&_.text-blue-500]:text-blue-400 [&_.text-red-500]:text-red-400 [&_.list-disc]:marker:text-white/30";
 
   // ════════════ RENDER ════════════
   return (
@@ -209,7 +209,7 @@ export default function Home() {
         <div className="max-w-[1600px] mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">🎨</span>
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 via-blue-500 to-pink-500 flex items-center justify-center"><svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15l3.5-4.5 2.5 3.01L14.5 9l4.5 6H5z"/></svg></div>
               <span className="text-xl font-bold bg-gradient-to-r from-violet-400 via-blue-400 to-pink-400 bg-clip-text text-transparent">Meta Ads Generator</span>
             </div>
             <div className="flex items-center gap-3">
