@@ -46,7 +46,7 @@ export default function Home() {
   const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string; keyIndex?: number } | null>(null);
   const [includeText, setIncludeText] = useState(true);
   const [includeLogo, setIncludeLogo] = useState(false);
-  const [videoEngine, setVideoEngine] = useState<'veo' | 'kling'>('veo');
+
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
 
@@ -96,27 +96,25 @@ export default function Home() {
   useEffect(() => {
     if (!videoPolling) return;
     localStorage.setItem('videoPolling', JSON.stringify(videoPolling));
-    const isKling = videoPolling.operation.startsWith('kling:');
-    const eng = isKling ? 'Kling' : 'Veo';
-    addLog(`🎬 Vidéo ${eng} en cours…`);
+    addLog('🎬 Vidéo Veo en cours…');
     let stop = false, retries = 0;
     const poll = async () => {
       if (stop) return;
-      const u = isKling ? `/api/kling-poll?taskId=${encodeURIComponent(videoPolling.operation.replace('kling:',''))}` : `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}&keyIndex=${videoPolling.keyIndex||0}`;
+      const u = `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}&keyIndex=${videoPolling.keyIndex||0}`;
       const { ok, data } = await safeFetch(u);
       if (!ok || (data.success === false && data.error)) {
         const m = data.error || '';
         if (['bloqué','sécurité','expirée','introuvable','safety','filtered'].some(k => m.includes(k))) { addLog(`❌ ${m}`); setVideoPolling(null); localStorage.removeItem('videoPolling'); return; }
         if (++retries < 30) { setTimeout(poll, 15000); return; }
-        setVideoPolling(null); localStorage.removeItem('videoPolling'); return;
+        addLog('⚠️ Vidéo Veo timeout'); setVideoPolling(null); localStorage.removeItem('videoPolling'); return;
       }
       if (data.success && data.done && data.videoUri) {
-        addLog(`✅ Vidéo ${eng} prête !`); setCurrentImage(data.videoUri); setCurrentPrompt(videoPolling.prompt);
+        addLog('✅ Vidéo Veo prête !'); setCurrentImage(data.videoUri); setCurrentPrompt(videoPolling.prompt);
         const ni = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
         setGeneratedImages(prev => { const up = [ni, ...prev]; if (up.length === 20) createAndDownloadZip(up, batchCount).then(s => { if (s) { setBatchCount(c => c+1); setGeneratedImages([]); localStorage.removeItem('generatedImages'); }}); return up; });
         setStats(prev => ({ ...prev, generated: prev.generated+1, remaining: prev.remaining-1 }));
         setVideoPolling(null); localStorage.removeItem('videoPolling'); loadStats();
-      } else if (data.pending) { retries = 0; setTimeout(poll, isKling ? 10000 : 12000); }
+      } else if (data.pending) { retries = 0; setTimeout(poll, 12000); }
       else if (++retries < 30) setTimeout(poll, 15000);
       else { setVideoPolling(null); localStorage.removeItem('videoPolling'); }
     };
@@ -143,7 +141,7 @@ export default function Home() {
     try {
       const max = 10;
       const lg = Object.fromEntries(Object.entries(productGroups).map(([n,imgs]) => [n, imgs.slice(0, Math.ceil(max/Object.keys(productGroups).length))]));
-      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine }) });
+      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine: 'veo' }) });
       if (!ok) { const m = data?.message||data?.error||''; if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts générés !'); setAutoMode(false); } else setError('⏳ Serveur occupé…'); setTimeout(() => setError(null), 5000); return; }
       if (data.success) {
         if (data.videoOperation && !data.imageUrl) { setVideoPolling({ operation: data.videoOperation, prompt: data.prompt, keyIndex: data.videoKeyIndex||0 }); }
@@ -210,10 +208,9 @@ export default function Home() {
       <header className="sticky top-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-xl border-b border-white/[0.06]">
         <div className="max-w-[1600px] mx-auto px-6">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-sm font-bold">M</div>
-              <span className="text-lg font-bold tracking-tight">Meta Ads Studio</span>
-              <span className="text-[10px] font-mono text-white/30 bg-white/5 px-2 py-0.5 rounded-full">BETA</span>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🎨</span>
+              <span className="text-xl font-bold bg-gradient-to-r from-violet-400 via-blue-400 to-pink-400 bg-clip-text text-transparent">Meta Ads Generator</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>{stats.generated} générés</div>
@@ -251,11 +248,7 @@ export default function Home() {
                 <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeLogo ? 'bg-violet-500 text-white' : 'border border-white/20'}`}>{includeLogo ? '✓' : ''}</span>
                 Avec logo
               </button>
-              <div className="h-6 w-px bg-white/[0.06]"></div>
-              <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5 border border-white/[0.06]">
-                <button onClick={() => setVideoEngine('veo')} className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-white/30 hover:text-white/50'}`}>Veo 3.1</button>
-                <button onClick={() => setVideoEngine('kling')} className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-500/20 text-purple-400 shadow-sm' : 'text-white/30 hover:text-white/50'}`}>Kling 2.6</button>
-              </div>
+
             </div>
 
             {/* Spacer */}
@@ -306,7 +299,7 @@ export default function Home() {
             <div className="mt-2 space-y-1">
               {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-500/10 text-emerald-400' : error.includes('⏳') ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{error}</div>}
               {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>Mode auto actif — génération continue</div>}
-              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Vidéo {videoPolling.operation.startsWith('kling:') ? 'Kling' : 'Veo'} en cours de création…</div>}
+              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Vidéo Veo en cours de création…</div>}
             </div>
           )}
         </div>
