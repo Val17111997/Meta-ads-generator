@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Supabase client — lazy init pour éviter crash au build
 function getSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,7 +35,6 @@ interface PromptItem {
   format: string;
 }
 
-// Concepts créatifs 2026
 const CREATIVE_CONCEPTS = [
   'UGC/Native style - authentic smartphone footage look',
   'Problem-Solution split - before/after transformation',
@@ -55,7 +53,6 @@ const CREATIVE_CONCEPTS = [
   'Tutorial/How-to - step by step demonstration'
 ];
 
-// Fetch le contenu d'un site web
 async function fetchWebsite(url: string): Promise<string> {
   try {
     let normalizedUrl = url;
@@ -99,8 +96,13 @@ async function fetchWebsite(url: string): Promise<string> {
   }
 }
 
-// Appeler Claude API pour analyser et générer des prompts
-async function callClaude(siteContent: string, siteUrl: string, existingCount: number = 0): Promise<{ analysis: SiteAnalysis; prompts: PromptItem[] }> {
+async function callClaude(
+  siteContent: string, 
+  siteUrl: string, 
+  existingCount: number = 0,
+  contentType: 'photo' | 'video' | 'both' = 'both',
+  promptCount: number = 20
+): Promise<{ analysis: SiteAnalysis; prompts: PromptItem[] }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   
   if (!apiKey) {
@@ -112,12 +114,22 @@ async function callClaude(siteContent: string, siteUrl: string, existingCount: n
   const variationNote = existingCount > 0 
     ? '\n\nIMPORTANT: Cette marque a déjà ' + existingCount + ' prompts. Génère des prompts DIFFÉRENTS et NOUVEAUX, avec des angles et concepts variés que tu n\'as pas encore utilisés.'
     : '';
+
+  // Instructions spécifiques selon le type de contenu
+  let typeInstruction = '';
+  if (contentType === 'photo') {
+    typeInstruction = '\n\nTYPE DE CONTENU : Génère UNIQUEMENT des prompts de type "photo". Aucun prompt vidéo.\nOptimise les prompts pour la génération d\'images fixes (compositions, éclairages, angles de vue).';
+  } else if (contentType === 'video') {
+    typeInstruction = '\n\nTYPE DE CONTENU : Génère UNIQUEMENT des prompts de type "video". Aucun prompt photo.\nOptimise les prompts pour la vidéo : mouvements de caméra, actions, transitions, séquences. Décris des scènes dynamiques avec du mouvement.';
+  } else {
+    typeInstruction = '\n\nTYPE DE CONTENU : Génère un MIX de prompts photo ET vidéo (environ 50/50). Indique le type approprié pour chaque prompt.';
+  }
   
-  const systemPrompt = 'Tu es un expert en marketing digital et création de contenu publicitaire pour les réseaux sociaux (Meta Ads, TikTok, Instagram).\n\nTa mission : analyser un site web de marque et générer 20 prompts créatifs pour la génération d\'images et vidéos publicitaires avec l\'IA (Gemini/Veo).\n\nCONCEPTS CRÉATIFS 2026 À UTILISER :\n' + conceptsList + '\n\nRÈGLES POUR LES PROMPTS :\n- Chaque prompt doit être en ANGLAIS (meilleur pour les modèles IA)\n- Décrire précisément la scène visuelle, l\'éclairage, l\'ambiance, le cadrage\n- Mentionner le produit de manière naturelle sans forcer\n- Varier les angles marketing : bénéfices, émotions, social proof, lifestyle\n- Adapter au ton et positionnement de la marque\n- Finir chaque prompt par "no text, no watermark" pour éviter les textes générés\n- Format : descriptions visuelles détaillées de 2-4 phrases' + variationNote + '\n\nFORMAT DE RÉPONSE (JSON strict) :\n{\n  "analysis": {\n    "brandName": "nom de la marque",\n    "positioning": "positionnement en 1 phrase",\n    "usps": ["USP 1", "USP 2", "USP 3"],\n    "values": ["valeur 1", "valeur 2"],\n    "products": ["produit 1", "produit 2"],\n    "targetAudience": "cible principale",\n    "tone": "ton de communication",\n    "socialProof": ["preuve sociale 1", "preuve sociale 2"]\n  },\n  "prompts": [\n    {\n      "prompt": "le prompt créatif complet en anglais",\n      "angle": "nom de l\'angle marketing",\n      "concept": "concept créatif utilisé",\n      "type": "photo ou video",\n      "format": "9:16 ou 1:1 ou 16:9"\n    }\n  ]\n}\n\nGénère EXACTEMENT 20 prompts variés couvrant différents angles et concepts.';
+  const systemPrompt = 'Tu es un expert en marketing digital et création de contenu publicitaire pour les réseaux sociaux (Meta Ads, TikTok, Instagram).\n\nTa mission : analyser un site web de marque et générer ' + promptCount + ' prompts créatifs pour la génération d\'images et vidéos publicitaires avec l\'IA (Gemini/Veo).\n\nCONCEPTS CRÉATIFS 2026 À UTILISER :\n' + conceptsList + typeInstruction + '\n\nRÈGLES POUR LES PROMPTS :\n- Chaque prompt doit être en ANGLAIS (meilleur pour les modèles IA)\n- Décrire précisément la scène visuelle, l\'éclairage, l\'ambiance, le cadrage\n- Mentionner le produit de manière naturelle sans forcer\n- Varier les angles marketing : bénéfices, émotions, social proof, lifestyle\n- Adapter au ton et positionnement de la marque\n- Finir chaque prompt par "no text, no watermark" pour éviter les textes générés\n- Format : descriptions visuelles détaillées de 2-4 phrases' + variationNote + '\n\nFORMAT DE RÉPONSE (JSON strict) :\n{\n  "analysis": {\n    "brandName": "nom de la marque",\n    "positioning": "positionnement en 1 phrase",\n    "usps": ["USP 1", "USP 2", "USP 3"],\n    "values": ["valeur 1", "valeur 2"],\n    "products": ["produit 1", "produit 2"],\n    "targetAudience": "cible principale",\n    "tone": "ton de communication",\n    "socialProof": ["preuve sociale 1", "preuve sociale 2"]\n  },\n  "prompts": [\n    {\n      "prompt": "le prompt créatif complet en anglais",\n      "angle": "nom de l\'angle marketing",\n      "concept": "concept créatif utilisé",\n      "type": "photo ou video",\n      "format": "9:16 ou 1:1 ou 16:9"\n    }\n  ]\n}\n\nGénère EXACTEMENT ' + promptCount + ' prompts variés couvrant différents angles et concepts.';
 
-  const userMessage = 'Analyse ce site web et génère 20 prompts marketing créatifs.\n\nURL du site : ' + siteUrl + '\n\nCONTENU DU SITE :\n' + siteContent + '\n\nRéponds UNIQUEMENT avec le JSON demandé, sans texte avant ou après.';
+  const userMessage = 'Analyse ce site web et génère ' + promptCount + ' prompts marketing créatifs.\n\nURL du site : ' + siteUrl + '\n\nCONTENU DU SITE :\n' + siteContent + '\n\nRéponds UNIQUEMENT avec le JSON demandé, sans texte avant ou après.';
 
-  console.log('🤖 Appel Claude API...');
+  console.log('🤖 Appel Claude API... (type: ' + contentType + ', count: ' + promptCount + ')');
   
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -165,7 +177,6 @@ async function callClaude(siteContent: string, siteUrl: string, existingCount: n
   }
 }
 
-// Ajouter les prompts à Supabase avec client_id
 async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): Promise<number> {
   const clientId = process.env.CLIENT_ID;
   if (!clientId) throw new Error('CLIENT_ID non configuré');
@@ -196,7 +207,6 @@ async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): P
   return rows.length;
 }
 
-// Compter les prompts existants pour une marque (filtré par client_id)
 async function countExistingPrompts(brandName: string): Promise<number> {
   const clientId = process.env.CLIENT_ID;
   if (!clientId) return 0;
@@ -218,7 +228,7 @@ async function countExistingPrompts(brandName: string): Promise<number> {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { url, brandOverride } = body;
+    const { url, brandOverride, contentType = 'both', promptCount = 20 } = body;
     
     if (!url) {
       return NextResponse.json({
@@ -227,24 +237,27 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
     
-    console.log('🌐 Analyse du site: ' + url);
+    console.log('🌐 Analyse du site: ' + url + ' (type: ' + contentType + ', count: ' + promptCount + ')');
     
     // Étape 1 : Fetch le contenu du site
     console.log('📥 Récupération du contenu...');
     const siteContent = await fetchWebsite(url);
     console.log('📄 Contenu récupéré: ' + siteContent.length + ' caractères');
     
-    // Étape 2 : Analyser avec Claude
+    // Étape 2 : Compter les existants
+    // On fait un pré-analyse rapide pour avoir le brandName
+    const existingCount = 0; // sera mis à jour après l'analyse
+    
+    // Étape 3 : Analyser avec Claude
     console.log('🧠 Analyse avec Claude...');
-    const { analysis, prompts } = await callClaude(siteContent, url, 0);
+    const { analysis, prompts } = await callClaude(siteContent, url, existingCount, contentType, promptCount);
     const brandName = brandOverride || analysis.brandName;
     
-    // Compter les existants pour info
-    const existingCount = await countExistingPrompts(brandName);
-    console.log('📊 Prompts existants pour ' + brandName + ': ' + existingCount);
-    console.log('✅ ' + prompts.length + ' nouveaux prompts générés');
+    const realExistingCount = await countExistingPrompts(brandName);
+    console.log('📊 Prompts existants pour ' + brandName + ': ' + realExistingCount);
+    console.log('✅ ' + prompts.length + ' nouveaux prompts générés (' + contentType + ')');
     
-    // Étape 3 : Ajouter à Supabase
+    // Étape 4 : Ajouter à Supabase
     console.log('💾 Ajout à Supabase...');
     const addedCount = await addPromptsToSupabase(prompts, brandName);
     
@@ -254,8 +267,9 @@ export async function POST(request: Request) {
       prompts,
       promptCount: prompts.length,
       addedToDatabase: addedCount,
-      totalForBrand: existingCount + addedCount,
-      message: prompts.length + ' prompts générés pour ' + brandName,
+      totalForBrand: realExistingCount + addedCount,
+      contentType,
+      message: prompts.length + ' prompts ' + contentType + ' générés pour ' + brandName,
     });
     
   } catch (error: unknown) {
