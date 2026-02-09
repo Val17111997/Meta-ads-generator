@@ -7,9 +7,6 @@ import PromptsTable from './components/PromptsTable';
 import FavoritesPanel from './components/FavoritesPanel';
 import type { FavoriteItem } from './components/FavoritesPanel';
 
-// ============================================================
-// Helper : fetch sécurisé — ne throw jamais, retourne toujours du JSON
-// ============================================================
 async function safeFetch(url: string, options?: RequestInit): Promise<{ ok: boolean; data: any }> {
   try {
     const res = await fetch(url, options);
@@ -17,12 +14,20 @@ async function safeFetch(url: string, options?: RequestInit): Promise<{ ok: bool
     let data: any = {};
     try { data = JSON.parse(text); } catch { data = { error: 'Réponse inattendue du serveur' }; }
     return { ok: res.ok && !data.error, data };
-  } catch {
-    return { ok: false, data: { error: 'Connexion au serveur impossible' } };
-  }
+  } catch { return { ok: false, data: { error: 'Connexion au serveur impossible' } }; }
 }
 
+const TABS = [
+  { id: 'strategy', label: 'Stratégie', icon: '◆' },
+  { id: 'prompts', label: 'Prompts', icon: '▤' },
+  { id: 'assets', label: 'Assets', icon: '◎' },
+  { id: 'studio', label: 'Studio', icon: '⬡' },
+] as const;
+type TabId = typeof TABS[number]['id'];
+
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<TabId>('strategy');
+  const [showLogs, setShowLogs] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [currentPrompt, setCurrentPrompt] = useState<string>('');
@@ -30,7 +35,7 @@ export default function Home() {
   const [autoMode, setAutoMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [productGroups, setProductGroups] = useState<{ [groupName: string]: { name: string; url: string }[] }>({});
+  const [productGroups, setProductGroups] = useState<{ [k: string]: { name: string; url: string }[] }>({});
   const [uploading, setUploading] = useState(false);
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -49,773 +54,393 @@ export default function Home() {
   const autoModeRef = useRef(false);
   const videoPollingRef = useRef(videoPolling);
   const promptsTableRef = useRef<{ reload: () => void }>(null);
+  const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoRetryCount = useRef(0);
 
   useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
   useEffect(() => { autoModeRef.current = autoMode; }, [autoMode]);
   useEffect(() => { videoPollingRef.current = videoPolling; }, [videoPolling]);
 
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString('fr-FR');
-    setLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 19)]);
-  };
-
-  const USER_MESSAGES = {
-    serverBusy: '⏳ Le serveur est occupé, nouvelle tentative automatique…',
-    networkError: '📡 Problème de connexion, nouvelle tentative…',
-    generationFailed: '⚠️ La génération n\'a pas abouti, réessaie dans un instant.',
-    noPrompts: '✅ Tous les prompts ont été générés !',
-    noImages: '📸 Ajoute des images produit pour commencer.',
-  };
-
-  const handlePromptsGenerated = () => {
-    loadStats();
-    promptsTableRef.current?.reload();
-    addLog('📋 Nouveaux prompts ajoutés — stats et tableau mis à jour');
-  };
+  const addLog = (msg: string) => { setLogs(prev => [`[${new Date().toLocaleTimeString('fr-FR')}] ${msg}`, ...prev.slice(0, 49)]); };
+  const handlePromptsGenerated = () => { loadStats(); promptsTableRef.current?.reload(); addLog('📋 Prompts ajoutés'); };
 
   // ── Favoris ──
   function addToFavorites(img: { url: string; prompt: string; timestamp: number; mediaType?: string }) {
     setFavorites(prev => {
-      if (prev.some(f => f.prompt === img.prompt)) {
-        addLog('⭐ Déjà en favoris');
-        return prev;
-      }
-      const fav: FavoriteItem = {
-        id: `fav-${img.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-        url: img.url,
-        prompt: img.prompt,
-        mediaType: img.mediaType,
-        timestamp: img.timestamp,
-      };
-      addLog('⭐ Ajouté aux favoris');
-      return [fav, ...prev];
+      if (prev.some(f => f.prompt === img.prompt)) return prev;
+      return [{ id: `fav-${img.timestamp}-${Math.random().toString(36).slice(2, 8)}`, ...img }, ...prev];
     });
   }
+  function removeFavorite(id: string) { setFavorites(prev => prev.filter(f => f.id !== id)); }
+  function clearAllFavorites() { if (confirm('Supprimer tous les favoris ?')) { setFavorites([]); localStorage.removeItem('favorites'); } }
 
-  function removeFavorite(id: string) {
-    setFavorites(prev => prev.filter(f => f.id !== id));
-  }
-
-  function clearAllFavorites() {
-    if (confirm('Supprimer tous les favoris ?')) {
-      setFavorites([]);
-      localStorage.removeItem('favorites');
-      addLog('🗑️ Favoris vidés');
-    }
-  }
-
-  // Persister les favoris
+  // ── Persistence ──
+  useEffect(() => { favorites.length > 0 ? localStorage.setItem('favorites', JSON.stringify(favorites)) : localStorage.removeItem('favorites'); }, [favorites]);
+  useEffect(() => { Object.keys(productGroups).length > 0 && localStorage.setItem('productGroups', JSON.stringify(productGroups)); }, [productGroups]);
+  useEffect(() => { brandAssets.length > 0 && localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); }, [brandAssets]);
   useEffect(() => {
-    if (favorites.length > 0) {
-      try { localStorage.setItem('favorites', JSON.stringify(favorites)); } catch { /* silencieux */ }
-    } else {
-      localStorage.removeItem('favorites');
-    }
-  }, [favorites]);
+    if (generatedImages.length > 0 && generatedImages.length < 20) {
+      (async () => { try { const c = await Promise.all(generatedImages.map(async img => ({ ...img, url: img.mediaType === 'video' ? img.url : await compressImage(img.url) }))); localStorage.setItem('generatedImages', JSON.stringify(c)); localStorage.setItem('batchCount', batchCount.toString()); } catch {} })();
+    } else if (generatedImages.length === 0) localStorage.removeItem('generatedImages');
+  }, [generatedImages, batchCount]);
 
+  // ── Init ──
   useEffect(() => {
     loadStats();
-    addLog('🚀 Application démarrée');
-    
-    const savedProductGroups = localStorage.getItem('productGroups');
-    if (savedProductGroups) {
-      try {
-        const parsed = JSON.parse(savedProductGroups);
-        setProductGroups(parsed);
-        const totalImages = Object.values(parsed).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
-        addLog(`📦 ${Object.keys(parsed).length} groupe(s) restauré(s) (${totalImages} images)`);
-      } catch (e) {
-        console.error('Erreur restauration groupes produits:', e);
-      }
-    }
-    
-    const savedBrandAssets = localStorage.getItem('brandAssets');
-    if (savedBrandAssets) {
-      try {
-        const parsed = JSON.parse(savedBrandAssets);
-        setBrandAssets(parsed);
-        addLog(`🎨 ${parsed.length} asset(s) de marque restauré(s)`);
-      } catch (e) {
-        console.error('Erreur restauration assets marque:', e);
-      }
-    }
-    
-    const savedGeneratedImages = localStorage.getItem('generatedImages');
-    if (savedGeneratedImages) {
-      try {
-        const parsed = JSON.parse(savedGeneratedImages);
-        setGeneratedImages(parsed);
-        addLog(`🖼️ ${parsed.length} média(s) généré(s) restauré(s)`);
-      } catch (e) {
-        console.error('Erreur restauration images générées:', e);
-        localStorage.removeItem('generatedImages');
-      }
-    }
-    
-    const savedBatchCount = localStorage.getItem('batchCount');
-    if (savedBatchCount) {
-      setBatchCount(parseInt(savedBatchCount));
-    }
-
-    const savedVideoPolling = localStorage.getItem('videoPolling');
-    if (savedVideoPolling) {
-      try {
-        const parsed = JSON.parse(savedVideoPolling);
-        setVideoPolling(parsed);
-        addLog(`🎬 Polling vidéo repris`);
-      } catch (e) {
-        localStorage.removeItem('videoPolling');
-      }
-    }
-
-    const savedFavorites = localStorage.getItem('favorites');
-    if (savedFavorites) {
-      try {
-        const parsed = JSON.parse(savedFavorites);
-        setFavorites(parsed);
-        addLog(`⭐ ${parsed.length} favori(s) restauré(s)`);
-      } catch (e) {
-        localStorage.removeItem('favorites');
-      }
-    }
+    const r = (k: string, s: (v: any) => void) => { const v = localStorage.getItem(k); if (v) try { s(JSON.parse(v)); } catch { localStorage.removeItem(k); } };
+    r('productGroups', setProductGroups); r('brandAssets', setBrandAssets); r('generatedImages', setGeneratedImages); r('favorites', setFavorites); r('videoPolling', setVideoPolling);
+    const b = localStorage.getItem('batchCount'); if (b) setBatchCount(parseInt(b));
   }, []);
 
+  // ── Video polling ──
   useEffect(() => {
     if (!videoPolling) return;
     localStorage.setItem('videoPolling', JSON.stringify(videoPolling));
     const isKling = videoPolling.operation.startsWith('kling:');
-    const engineLabel = isKling ? 'Kling' : 'Veo';
-    addLog(`🎬 Vidéo ${engineLabel} en cours de génération…`);
-    let stopped = false;
-    let retryCount = 0;
-    const maxRetries = 30;
-
-    const pollOnce = async () => {
-      if (stopped) return;
-      
-      let pollUrl: string;
-      if (isKling) {
-        const taskId = videoPolling.operation.replace('kling:', '');
-        pollUrl = `/api/kling-poll?taskId=${encodeURIComponent(taskId)}`;
-      } else {
-        pollUrl = `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}&keyIndex=${videoPolling.keyIndex || 0}`;
-      }
-      
-      const { ok, data } = await safeFetch(pollUrl);
-      
+    const eng = isKling ? 'Kling' : 'Veo';
+    addLog(`🎬 Vidéo ${eng} en cours…`);
+    let stop = false, retries = 0;
+    const poll = async () => {
+      if (stop) return;
+      const u = isKling ? `/api/kling-poll?taskId=${encodeURIComponent(videoPolling.operation.replace('kling:',''))}` : `/api/veo-poll?operation=${encodeURIComponent(videoPolling.operation)}&keyIndex=${videoPolling.keyIndex||0}`;
+      const { ok, data } = await safeFetch(u);
       if (!ok || (data.success === false && data.error)) {
-        const errorMsg = data.error || 'Erreur inconnue';
-        const isDefinitive = errorMsg.includes('bloqué') || errorMsg.includes('sécurité') || 
-                             errorMsg.includes('expirée') || errorMsg.includes('introuvable') ||
-                             errorMsg.includes('safety') || errorMsg.includes('filtered');
-        
-        if (isDefinitive) {
-          addLog(`❌ ${errorMsg}`);
-          setVideoPolling(null);
-          localStorage.removeItem('videoPolling');
-          return;
-        }
-        
-        retryCount++;
-        if (retryCount < maxRetries) {
-          setTimeout(pollOnce, 15000);
-          return;
-        }
-        addLog(`⚠️ La vidéo ${engineLabel} prend trop de temps, réessaie plus tard.`);
-        setVideoPolling(null);
-        localStorage.removeItem('videoPolling');
-        return;
+        const m = data.error || '';
+        if (['bloqué','sécurité','expirée','introuvable','safety','filtered'].some(k => m.includes(k))) { addLog(`❌ ${m}`); setVideoPolling(null); localStorage.removeItem('videoPolling'); return; }
+        if (++retries < 30) { setTimeout(poll, 15000); return; }
+        setVideoPolling(null); localStorage.removeItem('videoPolling'); return;
       }
-      
       if (data.success && data.done && data.videoUri) {
-        addLog(`✅ Vidéo ${engineLabel} générée avec succès !`);
-        setCurrentImage(data.videoUri);
-        setCurrentPrompt(videoPolling.prompt);
-        const newImage = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
-        setGeneratedImages(prev => {
-          const updated = [newImage, ...prev];
-          if (updated.length === 20) {
-            createAndDownloadZip(updated, batchCount).then(success => {
-              if (success) { setBatchCount(c => c + 1); setGeneratedImages([]); localStorage.removeItem('generatedImages'); }
-            });
-          }
-          return updated;
-        });
-        setStats(prev => ({ ...prev, generated: prev.generated + 1, remaining: prev.remaining - 1 }));
-        setVideoPolling(null);
-        localStorage.removeItem('videoPolling');
-        loadStats();
-      } else if (data.pending) {
-        retryCount = 0;
-        const pollInterval = isKling ? 10000 : 12000;
-        setTimeout(pollOnce, pollInterval);
-      } else {
-        retryCount++;
-        if (retryCount < maxRetries) {
-          setTimeout(pollOnce, 15000);
-        } else {
-          addLog(`⚠️ La vidéo ${engineLabel} n'a pas pu être générée.`);
-          setVideoPolling(null);
-          localStorage.removeItem('videoPolling');
-        }
-      }
+        addLog(`✅ Vidéo ${eng} prête !`); setCurrentImage(data.videoUri); setCurrentPrompt(videoPolling.prompt);
+        const ni = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
+        setGeneratedImages(prev => { const up = [ni, ...prev]; if (up.length === 20) createAndDownloadZip(up, batchCount).then(s => { if (s) { setBatchCount(c => c+1); setGeneratedImages([]); localStorage.removeItem('generatedImages'); }}); return up; });
+        setStats(prev => ({ ...prev, generated: prev.generated+1, remaining: prev.remaining-1 }));
+        setVideoPolling(null); localStorage.removeItem('videoPolling'); loadStats();
+      } else if (data.pending) { retries = 0; setTimeout(poll, isKling ? 10000 : 12000); }
+      else if (++retries < 30) setTimeout(poll, 15000);
+      else { setVideoPolling(null); localStorage.removeItem('videoPolling'); }
     };
-    pollOnce();
-    return () => { stopped = true; };
+    poll(); return () => { stop = true; };
   }, [videoPolling]);
 
-  useEffect(() => {
-    if (Object.keys(productGroups).length > 0) {
-      try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } 
-      catch { /* silencieux */ }
-    }
-  }, [productGroups]);
-
-  useEffect(() => {
-    if (brandAssets.length > 0) {
-      try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } 
-      catch { /* silencieux */ }
-    }
-  }, [brandAssets]);
-
-  useEffect(() => {
-    if (generatedImages.length > 0 && generatedImages.length < 20) {
-      const saveCompressed = async () => {
-        try {
-          const compressed = await Promise.all(generatedImages.map(async (img) => ({
-            ...img, url: img.mediaType === 'video' ? img.url : await compressImage(img.url)
-          })));
-          localStorage.setItem('generatedImages', JSON.stringify(compressed));
-          localStorage.setItem('batchCount', batchCount.toString());
-        } catch { /* silencieux */ }
-      };
-      saveCompressed();
-    } else if (generatedImages.length === 0) {
-      localStorage.removeItem('generatedImages');
-    }
-  }, [generatedImages, batchCount]);
-
-  useEffect(() => {
-    if (autoMode) { scheduleNext(); }
-    return () => { if (autoTimerRef.current) { clearTimeout(autoTimerRef.current); autoTimerRef.current = null; } };
-  }, [autoMode]);
-
-  const autoTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const autoRetryCount = useRef(0);
-
+  // ── Auto mode ──
+  useEffect(() => { if (autoMode) scheduleNext(); return () => { if (autoTimerRef.current) clearTimeout(autoTimerRef.current); }; }, [autoMode]);
   function scheduleNext() {
     if (!autoModeRef.current) return;
     if (isGeneratingRef.current) { autoTimerRef.current = setTimeout(scheduleNext, 3000); return; }
     if (videoPollingRef.current) { autoTimerRef.current = setTimeout(scheduleNext, 5000); return; }
-    generateSingle().then(() => { 
-      if (autoModeRef.current) { 
-        autoRetryCount.current = 0;
-        autoTimerRef.current = setTimeout(scheduleNext, 3000); 
-      } 
-    }).catch(() => {
-      if (autoModeRef.current) {
-        autoRetryCount.current++;
-        const delay = Math.min(3000 * Math.pow(2, autoRetryCount.current), 30000);
-        autoTimerRef.current = setTimeout(scheduleNext, delay);
-      }
-    });
+    generateSingle().then(() => { if (autoModeRef.current) { autoRetryCount.current = 0; autoTimerRef.current = setTimeout(scheduleNext, 3000); }})
+    .catch(() => { if (autoModeRef.current) { autoRetryCount.current++; autoTimerRef.current = setTimeout(scheduleNext, Math.min(3000*Math.pow(2,autoRetryCount.current),30000)); }});
   }
 
-  async function loadStats() {
-    const { ok, data } = await safeFetch('/api/stats');
-    if (ok) {
-      setStats({ generated: data.generated || 0, remaining: data.remaining || 0, total: data.total || 0 });
-    }
-  }
+  async function loadStats() { const { ok, data } = await safeFetch('/api/stats'); if (ok) setStats({ generated: data.generated||0, remaining: data.remaining||0, total: data.total||0 }); }
 
   async function generateSingle() {
     if (isGenerating) return;
-    const totalImages = Object.values(productGroups).reduce((sum, imgs) => sum + imgs.length, 0);
-    if (totalImages === 0) { setError(USER_MESSAGES.noImages); setTimeout(() => setError(null), 5000); return; }
-    
-    setIsGenerating(true);
-    setError(null);
-    addLog('🎨 Génération en cours…');
-    
+    const tot = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
+    if (tot === 0) { setError('📸 Ajoute des images produit.'); setTimeout(() => setError(null), 5000); return; }
+    setIsGenerating(true); setError(null); addLog('🎨 Génération…');
     try {
-      const maxImages = 10;
-      const limitedGroups = Object.fromEntries(
-        Object.entries(productGroups).map(([name, images]) => [name, images.slice(0, Math.ceil(maxImages / Object.keys(productGroups).length))])
-      );
-      
-      const { ok, data } = await safeFetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'single', productGroups: limitedGroups, brandAssets: brandAssets.map(asset => ({ url: asset.url, type: asset.type })), includeText, includeLogo, videoEngine }),
-      });
-      
-      if (!ok) {
-        const msg = data?.message || data?.error || '';
-        if (msg.includes('Aucun prompt') || msg.includes('en attente')) {
-          setError(USER_MESSAGES.noPrompts);
-          setAutoMode(false);
-        } else {
-          setError(USER_MESSAGES.serverBusy);
-          addLog('⏳ Serveur occupé, réessaie…');
-        }
-        setTimeout(() => setError(null), 5000);
-        return;
-      }
-      
+      const max = 10;
+      const lg = Object.fromEntries(Object.entries(productGroups).map(([n,imgs]) => [n, imgs.slice(0, Math.ceil(max/Object.keys(productGroups).length))]));
+      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine }) });
+      if (!ok) { const m = data?.message||data?.error||''; if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts générés !'); setAutoMode(false); } else setError('⏳ Serveur occupé…'); setTimeout(() => setError(null), 5000); return; }
       if (data.success) {
-        if (data.videoOperation && !data.imageUrl) {
-          addLog(`🎬 Vidéo en cours de création…`);
-          setVideoPolling({ operation: data.videoOperation, prompt: data.prompt, keyIndex: data.videoKeyIndex || 0 });
-        } else {
-          const newImage = { url: data.imageUrl, prompt: data.prompt, timestamp: Date.now(), mediaType: data.mediaType || 'image' };
-          setCurrentImage(data.imageUrl);
-          setCurrentPrompt(data.prompt);
-          setGeneratedImages(prev => {
-            const updated = [newImage, ...prev];
-            if (updated.length === 20) { createAndDownloadZip(updated, batchCount).then(success => { if (success) { setBatchCount(c => c + 1); setGeneratedImages([]); } }); }
-            return updated;
-          });
-          setStats(prev => ({ generated: prev.generated + 1, remaining: data.remaining, total: prev.total }));
-          addLog(`✅ Média généré avec succès`);
+        if (data.videoOperation && !data.imageUrl) { setVideoPolling({ operation: data.videoOperation, prompt: data.prompt, keyIndex: data.videoKeyIndex||0 }); }
+        else {
+          const ni = { url: data.imageUrl, prompt: data.prompt, timestamp: Date.now(), mediaType: data.mediaType||'image' };
+          setCurrentImage(data.imageUrl); setCurrentPrompt(data.prompt);
+          setGeneratedImages(prev => { const u = [ni,...prev]; if (u.length===20) createAndDownloadZip(u,batchCount).then(s => { if (s) { setBatchCount(c=>c+1); setGeneratedImages([]); }}); return u; });
+          setStats(prev => ({ generated: prev.generated+1, remaining: data.remaining, total: prev.total }));
+          addLog('✅ Média généré');
         }
         promptsTableRef.current?.reload();
-      } else {
-        const msg = data.message || '';
-        if (msg.includes('Aucun prompt') || msg.includes('en attente')) {
-          setError(USER_MESSAGES.noPrompts);
-          setAutoMode(false);
-        } else if (msg.includes('introuvable')) {
-          setError(`📦 Groupe de produit non trouvé. Vérifie tes groupes.`);
-        } else {
-          setError(USER_MESSAGES.generationFailed);
-        }
-        setTimeout(() => setError(null), 5000);
-      }
-    } catch {
-      setError(USER_MESSAGES.networkError);
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setIsGenerating(false);
-    }
+      } else { setError('⚠️ Génération échouée'); setTimeout(() => setError(null), 5000); }
+    } catch { setError('📡 Connexion impossible'); setTimeout(() => setError(null), 5000); }
+    finally { setIsGenerating(false); }
   }
 
-  function toggleAutoMode() {
-    if (autoMode) { setAutoMode(false); addLog('⏸️ Mode auto arrêté'); autoRetryCount.current = 0; } 
-    else { setAutoMode(true); addLog('🚀 Mode auto démarré'); }
+  function toggleAutoMode() { if (autoMode) { setAutoMode(false); autoRetryCount.current = 0; } else setAutoMode(true); }
+
+  // ── Groups ──
+  function createNewGroup() { if (!newGroupName.trim() || productGroups[newGroupName]) return; setProductGroups(prev => ({ ...prev, [newGroupName]: [] })); setNewGroupName(''); setShowNewGroupModal(false); }
+  function processFilesForGroup(g: string, files: FileList|File[]) {
+    const arr = Array.from(files).filter(f => f.type.startsWith('image/')); if (!arr.length) return;
+    setUploading(true); let d = 0;
+    arr.forEach(f => { const r = new FileReader(); r.onload = async e => { const c = await compressImage(e.target?.result as string); setProductGroups(prev => ({ ...prev, [g]: [...(prev[g]||[]), { name: f.name, url: c }] })); if (++d >= arr.length) setUploading(false); }; r.readAsDataURL(f); });
   }
+  function handleGroupImageUpload(g: string, e: React.ChangeEvent<HTMLInputElement>) { if (e.target.files?.length) processFilesForGroup(g, e.target.files); }
+  function handleGroupDrop(g: string, e: React.DragEvent) { e.preventDefault(); e.stopPropagation(); setDragOverGroup(null); if (e.dataTransfer.files?.length) processFilesForGroup(g, e.dataTransfer.files); }
+  function handleGroupDragOver(g: string, e: React.DragEvent) { e.preventDefault(); e.stopPropagation(); setDragOverGroup(g); }
+  function handleGroupDragLeave(e: React.DragEvent) { e.preventDefault(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); if (e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom) setDragOverGroup(null); }
+  function deleteGroupImage(g: string, n: string) { setProductGroups(prev => ({ ...prev, [g]: prev[g].filter(i => i.name !== n) })); }
+  function deleteGroup(g: string) { if (confirm(`Supprimer "${g}" ?`)) setProductGroups(prev => { const x = { ...prev }; delete x[g]; return x; }); }
+  function clearAllProductGroups() { if (confirm('Tout supprimer ?')) { setProductGroups({}); localStorage.removeItem('productGroups'); } }
 
-  function createNewGroup() {
-    if (!newGroupName.trim()) { alert('⚠️ Donne un nom au groupe !'); return; }
-    if (productGroups[newGroupName]) { alert('⚠️ Ce nom existe déjà !'); return; }
-    setProductGroups(prev => ({ ...prev, [newGroupName]: [] }));
-    addLog(`📁 Groupe "${newGroupName}" créé`);
-    setNewGroupName('');
-    setShowNewGroupModal(false);
+  // ── Brand ──
+  function handleBrandAssetUpload(e: React.ChangeEvent<HTMLInputElement>, type: 'logo'|'palette'|'style') {
+    if (!e.target.files?.length) return;
+    Array.from(e.target.files).forEach(f => { const r = new FileReader(); r.onload = ev => setBrandAssets(prev => [...prev, { name: f.name, url: ev.target?.result as string, type }]); r.readAsDataURL(f); });
   }
+  function deleteBrandAsset(n: string) { setBrandAssets(prev => prev.filter(a => a.name !== n)); }
+  function clearBrandAssets() { if (confirm('Supprimer ?')) { setBrandAssets([]); localStorage.removeItem('brandAssets'); } }
 
-  function processFilesForGroup(groupName: string, files: FileList | File[]) {
-    const fileArray = Array.from(files).filter(f => f.type.startsWith('image/'));
-    if (fileArray.length === 0) return;
-    setUploading(true);
-    addLog(`📤 Upload de ${fileArray.length} image(s)…`);
-    let processed = 0;
-    fileArray.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        const compressed = await compressImage(base64);
-        setProductGroups(prev => ({ ...prev, [groupName]: [...(prev[groupName] || []), { name: file.name, url: compressed }] }));
-        addLog(`✅ ${file.name} ajouté`);
-        processed++;
-        if (processed >= fileArray.length) setUploading(false);
-      };
-      reader.readAsDataURL(file);
-    });
+  // ── Utils ──
+  async function compressImage(b64: string): Promise<string> {
+    return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d')!; let w = img.width, h = img.height; const m = 600; if (w>h&&w>m) { h=(h*m)/w; w=m; } else if (h>m) { w=(w*m)/h; h=m; } c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',0.5)); }; img.onerror = () => res(b64); img.src = b64; });
   }
-
-  function handleGroupImageUpload(groupName: string, e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    processFilesForGroup(groupName, files);
-  }
-
-  function handleGroupDrop(groupName: string, e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverGroup(null);
-    const files = e.dataTransfer.files;
-    if (!files || files.length === 0) return;
-    processFilesForGroup(groupName, files);
-  }
-
-  function handleGroupDragOver(groupName: string, e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverGroup(groupName);
-  }
-
-  function handleGroupDragLeave(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const x = e.clientX, y = e.clientY;
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-      setDragOverGroup(null);
-    }
-  }
-
-  function deleteGroupImage(groupName: string, imageName: string) {
-    setProductGroups(prev => ({ ...prev, [groupName]: prev[groupName].filter(img => img.name !== imageName) }));
-  }
-
-  function deleteGroup(groupName: string) {
-    if (confirm(`Supprimer "${groupName}" ?`)) {
-      setProductGroups(prev => { const g = { ...prev }; delete g[groupName]; return g; });
-      addLog(`🗑️ Groupe supprimé`);
-    }
-  }
-
-  function clearAllProductGroups() {
-    if (confirm('Supprimer tous les groupes ?')) { setProductGroups({}); localStorage.removeItem('productGroups'); addLog('🗑️ Groupes effacés'); }
-  }
-
-  function handleBrandAssetUpload(e: React.ChangeEvent<HTMLInputElement>, type: 'logo' | 'palette' | 'style') {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    setUploadingBrand(true);
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setBrandAssets(prev => [...prev, { name: file.name, url: event.target?.result as string, type }]);
-        addLog(`✅ ${file.name} uploadé`);
-      };
-      reader.readAsDataURL(file);
-    });
-    setUploadingBrand(false);
-  }
-
-  function deleteBrandAsset(name: string) { setBrandAssets(prev => prev.filter(a => a.name !== name)); }
-  function clearBrandAssets() { if (confirm('Supprimer la charte ?')) { setBrandAssets([]); localStorage.removeItem('brandAssets'); addLog('🗑️ Charte effacée'); } }
-
-  async function compressImage(base64: string): Promise<string> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d')!;
-        const maxSize = 600;
-        let w = img.width, h = img.height;
-        if (w > h && w > maxSize) { h = (h * maxSize) / w; w = maxSize; } 
-        else if (h > maxSize) { w = (w * maxSize) / h; h = maxSize; }
-        canvas.width = w; canvas.height = h;
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.5));
-      };
-      img.onerror = () => resolve(base64);
-      img.src = base64;
-    });
-  }
-
-  function downloadSingleImage(url: string, prompt: string, ts: number) {
-    try {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `meta-ad-${ts}.${url.startsWith('data:video') ? 'mp4' : 'png'}`;
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    } catch { /* silencieux */ }
-  }
-
-  function downloadAllImages() {
-    if (generatedImages.length === 0) return;
-    addLog(`📦 Création ZIP…`);
-    createAndDownloadZip(generatedImages, batchCount);
-  }
-
-  function clearAllData() {
-    if (confirm('Tout supprimer ?')) {
-      setProductGroups({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]);
-      localStorage.removeItem('productGroups'); localStorage.removeItem('brandAssets'); localStorage.removeItem('generatedImages'); localStorage.removeItem('batchCount'); localStorage.removeItem('videoPolling'); localStorage.removeItem('favorites');
-      addLog('🗑️ Tout effacé');
-    }
-  }
-
-  function clearGeneratedImages() {
-    if (confirm('Vider la galerie ?')) { setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); localStorage.removeItem('generatedImages'); addLog('🗑️ Galerie vidée'); }
-  }
-
+  function downloadSingle(url: string, ts: number) { try { const a = document.createElement('a'); a.href=url; a.download=`meta-ad-${ts}.${url.startsWith('data:video')?'mp4':'png'}`; document.body.appendChild(a); a.click(); document.body.removeChild(a); } catch {} }
+  function downloadAll() { if (generatedImages.length) createAndDownloadZip(generatedImages, batchCount); }
+  function clearGallery() { if (confirm('Vider ?')) { setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); localStorage.removeItem('generatedImages'); } }
+  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','brandAssets','generatedImages','batchCount','videoPolling','favorites'].forEach(k => localStorage.removeItem(k)); } }
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
-    try {
-      const zip = new JSZip();
-      for (let i = 0; i < images.length; i++) {
-        const m = images[i];
-        const isVideo = m.mediaType === 'video' || m.url.startsWith('data:video');
-        zip.file(`${isVideo ? 'video' : 'image'}-${i + 1}.${isVideo ? 'mp4' : 'png'}`, m.url.split(',')[1], { base64: true });
-      }
-      const blob = await zip.generateAsync({ type: 'blob' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `meta-ads-batch-${batch}.zip`;
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      addLog(`✅ ZIP téléchargé`);
-      return true;
-    } catch { addLog('⚠️ Erreur lors du téléchargement'); return false; }
+    try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meta-ads-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
   }
 
+  const totalAssets = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
+  const progress = stats.total > 0 ? Math.round((stats.generated/stats.total)*100) : 0;
+  const darkTheme = "[&_.bg-white]:bg-[#1a1a24] [&_.bg-white]:border [&_.bg-white]:border-white/[0.06] [&_.text-gray-600]:text-white/50 [&_.text-gray-700]:text-white/60 [&_.text-gray-800]:text-white/80 [&_.text-gray-500]:text-white/40 [&_.text-gray-400]:text-white/30 [&_.bg-gray-50]:bg-white/[0.03] [&_.bg-gray-100]:bg-white/[0.05] [&_.bg-gray-200]:bg-white/[0.08] [&_.bg-gray-300]:bg-white/10 [&_.border-gray-200]:border-white/[0.06] [&_.border-gray-300]:border-white/10 [&_.shadow-lg]:shadow-none [&_input]:bg-white/5 [&_input]:border-white/10 [&_input]:text-white [&_select]:bg-white/5 [&_select]:text-white [&_.rounded-2xl]:rounded-xl [&_table]:text-white/70 [&_th]:text-white/50 [&_td]:border-white/[0.04]";
+
+  // ════════════ RENDER ════════════
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50 p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-8 mt-8">
-          <h1 className="text-6xl font-bold mb-3 bg-gradient-to-r from-purple-600 via-blue-600 to-pink-600 bg-clip-text text-transparent">🎨 Meta Ads Generator</h1>
-          <p className="text-gray-600 text-lg">Powered by Google Gemini AI + Supabase</p>
-        </div>
+    <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 
-        <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} />
-        <PromptsTable ref={promptsTableRef} productGroups={Object.keys(productGroups)} />
-
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center hover:scale-105 transition-transform">
-            <div className="text-5xl font-bold text-green-600 mb-2">{stats.generated}</div>
-            <div className="text-sm text-gray-600 uppercase">✅ Générés</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center hover:scale-105 transition-transform">
-            <div className="text-5xl font-bold text-orange-600 mb-2">{stats.remaining}</div>
-            <div className="text-sm text-gray-600 uppercase">⏳ En attente</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 text-center hover:scale-105 transition-transform">
-            <div className="text-5xl font-bold text-blue-600 mb-2">{stats.total}</div>
-            <div className="text-sm text-gray-600 uppercase">📊 Total</div>
-          </div>
-        </div>
-
-        {stats.total === 0 && (
-          <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-6">
-            <h3 className="font-bold text-yellow-800 text-lg mb-2">⚠️ Aucun prompt</h3>
-            <p className="text-yellow-700 text-sm">Utilise l'analyseur de site ou ajoute des prompts manuellement dans le tableau ci-dessus.</p>
-          </div>
-        )}
-
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">📸 Bibliothèque Produits</h2>
-            <div className="flex gap-2">
-              <button onClick={() => setShowNewGroupModal(true)} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg font-semibold">+ Créer un groupe</button>
-              {Object.keys(productGroups).length > 0 && (
-                <button onClick={clearAllProductGroups} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold">🗑️ Tout effacer</button>
-              )}
+      {/* ═══ HEADER ═══ */}
+      <header className="sticky top-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-xl border-b border-white/[0.06]">
+        <div className="max-w-[1600px] mx-auto px-6">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-sm font-bold">M</div>
+              <span className="text-lg font-bold tracking-tight">Meta Ads Studio</span>
+              <span className="text-[10px] font-mono text-white/30 bg-white/5 px-2 py-0.5 rounded-full">BETA</span>
             </div>
-          </div>
-
-          {showNewGroupModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-                <h3 className="text-xl font-bold mb-4">Créer un groupe</h3>
-                <input type="text" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} placeholder="Nom du groupe..." className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg mb-4 focus:border-blue-500 focus:outline-none" onKeyPress={(e) => e.key === 'Enter' && createNewGroup()} />
-                <div className="flex gap-2">
-                  <button onClick={createNewGroup} className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold">Créer</button>
-                  <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-semibold">Annuler</button>
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>{stats.generated} générés</div>
+              <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 px-3 py-1.5 rounded-lg text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>{stats.remaining} restants</div>
+              {stats.total > 0 && <div className="w-32 h-2 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all duration-700" style={{ width: `${progress}%` }}></div></div>}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1">
+                <button onClick={() => setIncludeText(!includeText)} className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${includeText ? 'bg-white/10 text-white' : 'text-white/40'}`} title="Texte">✍️</button>
+                <button onClick={() => setIncludeLogo(!includeLogo)} className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${includeLogo ? 'bg-white/10 text-white' : 'text-white/40'}`} title="Logo">🏷️</button>
+                <div className="w-px h-4 bg-white/10"></div>
+                <button onClick={() => setVideoEngine('veo')} className={`px-2 py-1.5 rounded-md text-[11px] font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-500/20 text-blue-400' : 'text-white/40'}`}>Veo</button>
+                <button onClick={() => setVideoEngine('kling')} className={`px-2 py-1.5 rounded-md text-[11px] font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-500/20 text-purple-400' : 'text-white/40'}`}>Kling</button>
               </div>
+              <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-lg text-sm font-semibold hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-violet-500/20 active:scale-95">
+                {isGenerating ? <span className="flex items-center gap-2"><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span></span> : '⚡ Générer'}
+              </button>
+              <button onClick={toggleAutoMode} disabled={stats.remaining === 0} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all active:scale-95 ${autoMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+                {autoMode ? '■ Stop' : '▶ Auto'}
+              </button>
+              <button onClick={() => setShowLogs(!showLogs)} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showLogs ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/50'}`}>📋</button>
             </div>
-          )}
-
-          {Object.keys(productGroups).length === 0 ? (
-            <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
-              <div className="text-6xl mb-4">📂</div>
-              <p className="text-gray-600 font-semibold">Aucun groupe de produit</p>
-              <p className="text-sm text-gray-500">Crée un groupe pour uploader des images</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {Object.entries(productGroups).map(([groupName, images]) => (
-                <div 
-                  key={groupName} 
-                  className={`border-2 rounded-xl p-4 transition-all duration-200 ${
-                    dragOverGroup === groupName 
-                      ? 'border-blue-500 bg-blue-50 shadow-lg shadow-blue-100 scale-[1.01]' 
-                      : 'border-gray-200'
-                  }`}
-                  onDrop={(e) => handleGroupDrop(groupName, e)}
-                  onDragOver={(e) => handleGroupDragOver(groupName, e)}
-                  onDragLeave={handleGroupDragLeave}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-bold">📂 {groupName} <span className="text-sm text-gray-500 font-normal">({images.length})</span></h3>
-                    <div className="flex gap-2">
-                      <label className="cursor-pointer">
-                        <input type="file" multiple accept="image/*" onChange={(e) => handleGroupImageUpload(groupName, e)} disabled={uploading} className="hidden" />
-                        <span className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg font-semibold inline-block">+ Images</span>
-                      </label>
-                      <button onClick={() => deleteGroup(groupName)} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold">🗑️</button>
-                    </div>
-                  </div>
-                  {images.length === 0 ? (
-                    <div className={`text-center py-8 rounded-lg border-2 border-dashed transition-all ${
-                      dragOverGroup === groupName
-                        ? 'border-blue-400 bg-blue-50'
-                        : 'border-gray-300 bg-gray-50'
-                    }`}>
-                      <p className="text-gray-500 text-sm">
-                        {dragOverGroup === groupName ? '📥 Lâche pour ajouter !' : '📎 Glisse des images ici ou clique "+ Images"'}
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-4 gap-3">
-                        {images.map((img, i) => (
-                          <div key={i} className="relative group">
-                            <img src={img.url} alt={img.name} className="w-full h-24 object-cover rounded-lg shadow-md" />
-                            <button onClick={() => deleteGroupImage(groupName, img.name)} className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                              <span className="bg-red-600 text-white px-3 py-1 rounded text-sm font-semibold">🗑️</span>
-                            </button>
-                            <p className="text-xs text-gray-600 mt-1 truncate">{img.name}</p>
-                          </div>
-                        ))}
-                      </div>
-                      {dragOverGroup === groupName && (
-                        <div className="mt-3 text-center py-2 rounded-lg border-2 border-dashed border-blue-400 bg-blue-50 animate-pulse">
-                          <p className="text-blue-600 text-sm font-medium">📥 Lâche pour ajouter !</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold">🎨 Charte Graphique</h2>
-            {brandAssets.length > 0 && <button onClick={clearBrandAssets} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold">🗑️ Vider</button>}
           </div>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            {['logo', 'palette', 'style'].map((type) => (
-              <label key={type} className="block">
-                <div className="border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-lg p-4 text-center cursor-pointer transition-all">
-                  <input type="file" accept="image/*" multiple={type === 'style'} onChange={(e) => handleBrandAssetUpload(e, type as any)} disabled={uploadingBrand} className="hidden" />
-                  <div className="text-3xl mb-2">{type === 'logo' ? '🏷️' : type === 'palette' ? '🎨' : '✨'}</div>
-                  <p className="text-sm font-semibold text-gray-700 capitalize">{type}</p>
-                </div>
-              </label>
+
+          {(error || (autoMode && !error) || videoPolling) && (
+            <div className="pb-2 space-y-1">
+              {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-500/10 text-emerald-400' : error.includes('⏳') ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{error}</div>}
+              {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>Mode auto actif</div>}
+              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Vidéo {videoPolling.operation.startsWith('kling:') ? 'Kling' : 'Veo'} en cours…</div>}
+            </div>
+          )}
+
+          <div className="flex gap-1">
+            {TABS.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-5 py-3 text-sm font-medium rounded-t-lg transition-all ${activeTab === tab.id ? 'bg-[#13131a] text-white' : 'text-white/40 hover:text-white/60 hover:bg-white/[0.03]'}`}>
+                <span className="mr-2 opacity-60">{tab.icon}</span>{tab.label}
+                {((tab.id === 'studio' && generatedImages.length > 0) || (tab.id === 'prompts' && stats.total > 0)) && <span className="ml-2 w-1.5 h-1.5 rounded-full bg-violet-500 inline-block"></span>}
+              </button>
             ))}
           </div>
-          {brandAssets.length > 0 && (
-            <div className="grid grid-cols-4 gap-4">
-              {brandAssets.map((asset, i) => (
-                <div key={i} className="relative group">
-                  <img src={asset.url} alt={asset.name} className="w-full h-24 object-contain bg-gray-50 rounded-lg shadow-md p-2" />
-                  <button onClick={() => deleteBrandAsset(asset.name)} className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                    <span className="bg-red-600 text-white px-3 py-1 rounded text-sm font-semibold">🗑️</span>
-                  </button>
-                </div>
-              ))}
+        </div>
+      </header>
+
+      {/* ═══ MAIN ═══ */}
+      <main className="flex-1 bg-[#13131a]">
+        <div className="max-w-[1600px] mx-auto p-6">
+
+          {activeTab === 'strategy' && (
+            <div className="space-y-6">
+              <div><h2 className="text-2xl font-bold tracking-tight">Stratégie de contenu</h2><p className="text-white/40 text-sm mt-1">Analyse un site et génère des prompts optimisés</p></div>
+              <div className={darkTheme}><SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} /></div>
             </div>
           )}
-        </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="flex gap-4 mb-4 flex-wrap">
-            <label className="flex items-center gap-2 cursor-pointer select-none bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 hover:border-blue-400 transition-colors">
-              <input type="checkbox" checked={includeText} onChange={(e) => setIncludeText(e.target.checked)} className="w-5 h-5 rounded accent-blue-600" />
-              <span className="font-medium text-gray-700">✍️ Avec texte</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer select-none bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 hover:border-blue-400 transition-colors">
-              <input type="checkbox" checked={includeLogo} onChange={(e) => setIncludeLogo(e.target.checked)} className="w-5 h-5 rounded accent-blue-600" />
-              <span className="font-medium text-gray-700">🏷️ Avec logo</span>
-            </label>
-            <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">
-              <span className="font-medium text-gray-700">🎬 Moteur vidéo:</span>
-              <button onClick={() => setVideoEngine('veo')} className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>Veo 3.1</button>
-              <button onClick={() => setVideoEngine('kling')} className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>Kling 2.6</button>
-            </div>
-          </div>
-          <div className="flex gap-4 mb-4">
-            <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white px-8 py-5 rounded-xl font-bold text-xl hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed transition-all hover:scale-105 active:scale-95 shadow-lg">
-              {isGenerating ? <span className="flex items-center justify-center gap-3"><span className="animate-spin">⏳</span> Génération…</span> : '🎯 Générer'}
-            </button>
-            <button onClick={toggleAutoMode} disabled={stats.remaining === 0} className={`flex-1 px-8 py-5 rounded-xl font-bold text-xl text-white transition-all hover:scale-105 active:scale-95 shadow-lg ${autoMode ? 'bg-gradient-to-r from-red-600 to-red-700 animate-pulse' : 'bg-gradient-to-r from-green-600 to-green-700'} disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed`}>
-              {autoMode ? '⏸️ ARRÊTER' : '🚀 MODE AUTO'}
-            </button>
-          </div>
-          {error && (
-            <div className={`mt-4 p-4 rounded-lg font-medium transition-all ${
-              error.includes('✅') ? 'bg-green-50 border-2 border-green-200 text-green-700' :
-              error.includes('⏳') || error.includes('📡') ? 'bg-yellow-50 border-2 border-yellow-200 text-yellow-700' :
-              'bg-orange-50 border-2 border-orange-200 text-orange-700'
-            }`}>
-              {error}
+          {activeTab === 'prompts' && (
+            <div className="space-y-6">
+              <div><h2 className="text-2xl font-bold tracking-tight">Bibliothèque de prompts</h2><p className="text-white/40 text-sm mt-1">{stats.total} prompts • {stats.generated} générés • {stats.remaining} en attente</p></div>
+              <div className={darkTheme}><PromptsTable ref={promptsTableRef} productGroups={Object.keys(productGroups)} /></div>
             </div>
           )}
-          {autoMode && !error && <div className="mt-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg text-green-700 font-medium animate-pulse">🤖 Mode auto actif</div>}
-          {videoPolling && <div className="mt-4 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg text-blue-700 font-medium animate-pulse">🎬 Vidéo {videoPolling.operation.startsWith('kling:') ? 'Kling' : 'Veo'} en cours de création…</div>}
-        </div>
 
-        <div className="grid grid-cols-2 gap-6">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-4">🖼️ Dernier média</h2>
-            {currentImage ? (
-              <div>
-                <div className="relative aspect-square rounded-xl overflow-hidden shadow-lg mb-4 border-4 border-gray-100">
-                  {currentImage.startsWith('data:video') ? <video src={currentImage} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={currentImage} alt="Generated" className="w-full h-full object-cover" />}
-                </div>
-                {currentPrompt && <div className="bg-gray-50 p-4 rounded-lg mb-4"><p className="text-sm text-gray-600">Prompt:</p><p className="text-gray-800 mt-1 text-sm">{currentPrompt}</p></div>}
-                <a href={currentImage} download={`meta-ad-${Date.now()}.png`} className="block w-full py-3 bg-gradient-to-r from-green-600 to-green-700 text-white text-center rounded-lg font-bold">📥 Télécharger</a>
+          {activeTab === 'assets' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div><h2 className="text-2xl font-bold tracking-tight">Assets créatifs</h2><p className="text-white/40 text-sm mt-1">{Object.keys(productGroups).length} groupes • {totalAssets} images • {brandAssets.length} assets de marque</p></div>
+                <button onClick={clearAllData} className="text-xs text-white/30 hover:text-red-400 transition-colors">Tout réinitialiser</button>
               </div>
-            ) : (
-              <div className="aspect-square rounded-xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                <div className="text-center"><div className="text-6xl mb-4">🎨</div><p className="text-gray-400">Aucun média</p></div>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-2xl font-bold mb-4">📋 Journal</h2>
-            <div className="space-y-2 max-h-[600px] overflow-y-auto">
-              {logs.length === 0 ? <p className="text-gray-400 text-sm text-center py-8">Aucune activité</p> : logs.map((log, i) => <div key={i} className="text-sm font-mono bg-gray-50 p-3 rounded-lg border border-gray-200">{log}</div>)}
-            </div>
-          </div>
-        </div>
-
-        {generatedImages.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mt-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold">🖼️ Galerie ({generatedImages.length})</h2>
-              <div className="flex gap-2">
-                <button onClick={downloadAllImages} className="px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-bold shadow-lg">📦 ZIP</button>
-                <button onClick={clearGeneratedImages} className="px-6 py-3 bg-red-500 text-white rounded-lg font-bold shadow-lg">🗑️ Vider</button>
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-6">
-              {generatedImages.map((img, i) => (
-                <div key={i} className="bg-gray-50 rounded-lg p-3 hover:shadow-lg transition-all">
-                  <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border-2 border-gray-200">
-                    {img.mediaType === 'video' ? <video src={img.url} loop muted className="w-full h-full object-cover" onMouseEnter={(e) => (e.target as HTMLVideoElement).play()} onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }} /> : <img src={img.url} alt="" className="w-full h-full object-cover" />}
-                    {img.mediaType === 'video' && <div className="absolute top-2 right-2 bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">🎬</div>}
+              <div className="grid grid-cols-2 gap-6">
+                {/* Produits */}
+                <div className="bg-[#1a1a24] rounded-xl border border-white/[0.06] p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-white/80">📸 Produits</h3>
+                    <div className="flex gap-2">
+                      <button onClick={() => setShowNewGroupModal(true)} className="px-3 py-1.5 bg-violet-500/20 text-violet-400 text-xs rounded-lg font-semibold hover:bg-violet-500/30">+ Groupe</button>
+                      {Object.keys(productGroups).length > 0 && <button onClick={clearAllProductGroups} className="px-3 py-1.5 bg-red-500/10 text-red-400 text-xs rounded-lg font-semibold hover:bg-red-500/20">Vider</button>}
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-600 mb-2 line-clamp-2">{img.prompt}</p>
+                  {Object.keys(productGroups).length === 0 ? (
+                    <div className="text-center py-12 rounded-xl border border-dashed border-white/10"><div className="text-4xl mb-3 opacity-40">📂</div><p className="text-white/30 text-sm">Crée un groupe pour commencer</p></div>
+                  ) : (
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                      {Object.entries(productGroups).map(([gn, images]) => (
+                        <div key={gn} className={`rounded-lg p-3 border transition-all ${dragOverGroup === gn ? 'border-violet-500/50 bg-violet-500/5' : 'border-white/[0.06] bg-white/[0.02]'}`}
+                          onDrop={e => handleGroupDrop(gn,e)} onDragOver={e => handleGroupDragOver(gn,e)} onDragLeave={handleGroupDragLeave}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-white/70">{gn} <span className="text-white/30">({images.length})</span></span>
+                            <div className="flex gap-1">
+                              <label className="cursor-pointer"><input type="file" multiple accept="image/*" onChange={e => handleGroupImageUpload(gn,e)} disabled={uploading} className="hidden" /><span className="px-2 py-1 bg-white/5 hover:bg-white/10 text-white/50 text-xs rounded font-medium cursor-pointer">+</span></label>
+                              <button onClick={() => deleteGroup(gn)} className="px-2 py-1 text-white/20 hover:text-red-400 text-xs">✕</button>
+                            </div>
+                          </div>
+                          {images.length > 0 ? (
+                            <div className="grid grid-cols-5 gap-1.5">{images.map((img,i) => (
+                              <div key={i} className="relative group aspect-square">
+                                <img src={img.url} alt="" className="w-full h-full object-cover rounded" />
+                                <button onClick={() => deleteGroupImage(gn,img.name)} className="absolute inset-0 bg-black/0 group-hover:bg-black/60 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"><span className="text-red-400 text-xs">✕</span></button>
+                              </div>
+                            ))}</div>
+                          ) : <div className="text-center py-4 text-white/20 text-xs">Glisse des images ici</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Charte */}
+                <div className="bg-[#1a1a24] rounded-xl border border-white/[0.06] p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-white/80">🎨 Charte graphique</h3>
+                    {brandAssets.length > 0 && <button onClick={clearBrandAssets} className="px-3 py-1.5 bg-red-500/10 text-red-400 text-xs rounded-lg font-semibold hover:bg-red-500/20">Vider</button>}
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    {([['logo','🏷️','Logo'],['palette','🎨','Palette'],['style','✨','Style']] as const).map(([type,icon,label]) => (
+                      <label key={type} className="cursor-pointer">
+                        <div className="border border-dashed border-white/10 hover:border-violet-500/30 rounded-lg p-4 text-center transition-all hover:bg-violet-500/5">
+                          <input type="file" accept="image/*" multiple={type==='style'} onChange={e => handleBrandAssetUpload(e,type)} disabled={uploadingBrand} className="hidden" />
+                          <div className="text-2xl mb-1">{icon}</div><p className="text-xs font-medium text-white/40">{label}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {brandAssets.length > 0 && (
+                    <div className="grid grid-cols-4 gap-3">{brandAssets.map((a,i) => (
+                      <div key={i} className="relative group"><img src={a.url} alt="" className="w-full h-20 object-contain bg-white/[0.03] rounded-lg p-2" />
+                        <button onClick={() => deleteBrandAsset(a.name)} className="absolute inset-0 bg-black/0 group-hover:bg-black/60 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"><span className="text-red-400 text-xs">✕</span></button>
+                      </div>
+                    ))}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'studio' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div><h2 className="text-2xl font-bold tracking-tight">Studio créatif</h2><p className="text-white/40 text-sm mt-1">{generatedImages.length} médias • {favorites.length} favoris</p></div>
+                {generatedImages.length > 0 && (
                   <div className="flex gap-2">
-                    <button onClick={() => addToFavorites(img)} className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm rounded font-semibold transition-colors">⭐</button>
-                    <button onClick={() => downloadSingleImage(img.url, img.prompt, img.timestamp)} className="flex-1 py-2 bg-green-600 text-white text-sm rounded font-semibold">📥</button>
+                    <button onClick={downloadAll} className="px-4 py-2 bg-violet-500/20 text-violet-400 text-sm rounded-lg font-semibold hover:bg-violet-500/30">📦 ZIP</button>
+                    <button onClick={clearGallery} className="px-4 py-2 bg-red-500/10 text-red-400 text-sm rounded-lg font-semibold hover:bg-red-500/20">🗑️ Vider</button>
                   </div>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-6">
+                {/* Dernier média */}
+                <div className="col-span-1 bg-[#1a1a24] rounded-xl border border-white/[0.06] p-4">
+                  <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Dernier média</h3>
+                  {currentImage ? (
+                    <div>
+                      <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border border-white/[0.06]">
+                        {currentImage.startsWith('data:video') ? <video src={currentImage} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
+                      </div>
+                      {currentPrompt && <p className="text-[11px] text-white/40 line-clamp-3 mb-3">{currentPrompt}</p>}
+                      <a href={currentImage} download={`meta-ad-${Date.now()}.png`} className="block w-full py-2 bg-white/5 hover:bg-white/10 text-center rounded-lg text-xs font-medium text-white/60 transition-colors">📥 Télécharger</a>
+                    </div>
+                  ) : (
+                    <div className="aspect-square rounded-lg bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
+                      <div className="text-center"><div className="text-4xl mb-2 opacity-20">⬡</div><p className="text-white/20 text-xs">En attente</p></div>
+                    </div>
+                  )}
                 </div>
-              ))}
+                {/* Galerie */}
+                <div className="col-span-3">
+                  {generatedImages.length > 0 ? (
+                    <div className="grid grid-cols-4 gap-3">
+                      {generatedImages.map((img, i) => (
+                        <div key={i} className="group bg-[#1a1a24] rounded-lg border border-white/[0.06] overflow-hidden hover:border-white/10 transition-all">
+                          <div className="relative aspect-square">
+                            {img.mediaType === 'video'
+                              ? <video src={img.url} loop muted className="w-full h-full object-cover" onMouseEnter={e => (e.target as HTMLVideoElement).play()} onMouseLeave={e => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }} />
+                              : <img src={img.url} alt="" className="w-full h-full object-cover" />}
+                            {img.mediaType === 'video' && <div className="absolute top-2 right-2 bg-red-500/80 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
+                          </div>
+                          <div className="p-2">
+                            <p className="text-[10px] text-white/30 line-clamp-1 mb-2">{img.prompt}</p>
+                            <div className="flex gap-1">
+                              <button onClick={() => addToFavorites(img)} className="flex-1 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-[11px] rounded font-medium transition-colors">⭐</button>
+                              <button onClick={() => downloadSingle(img.url, img.timestamp)} className="flex-1 py-1.5 bg-white/5 hover:bg-white/10 text-white/40 text-[11px] rounded font-medium transition-colors">📥</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-64 rounded-xl border border-dashed border-white/10">
+                      <div className="text-center"><div className="text-5xl mb-3 opacity-15">⬡</div><p className="text-white/20 text-sm">Les médias apparaîtront ici</p><p className="text-white/10 text-xs mt-1">Utilise ⚡ Générer ou ▶ Auto</p></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Favoris */}
+              <div className={darkTheme}>
+                <FavoritesPanel favorites={favorites} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} />
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* ═══ LOG DRAWER ═══ */}
+      {showLogs && (
+        <div className="fixed right-0 top-0 bottom-0 w-96 bg-[#0a0a0f] border-l border-white/[0.06] z-[60] flex flex-col shadow-2xl shadow-black/50">
+          <div className="flex items-center justify-between p-4 border-b border-white/[0.06]">
+            <h3 className="font-semibold text-sm">📋 Journal</h3>
+            <button onClick={() => setShowLogs(false)} className="text-white/30 hover:text-white/60 text-lg">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-1">
+            {logs.length === 0 ? <p className="text-white/20 text-xs text-center py-8">Aucune activité</p> : logs.map((log, i) => (
+              <div key={i} className="text-[11px] text-white/40 py-2 px-3 rounded bg-white/[0.02] font-mono">{log}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL ═══ */}
+      {showNewGroupModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70]">
+          <div className="bg-[#1a1a24] rounded-xl p-6 max-w-sm w-full mx-4 border border-white/[0.06]">
+            <h3 className="font-bold mb-4 text-white/80">Nouveau groupe</h3>
+            <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Nom du groupe…" className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg mb-4 focus:border-violet-500/50 focus:outline-none text-sm text-white placeholder:text-white/20" onKeyDown={e => e.key==='Enter' && createNewGroup()} autoFocus />
+            <div className="flex gap-2">
+              <button onClick={createNewGroup} className="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-semibold">Créer</button>
+              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-white/60 rounded-lg text-sm font-medium">Annuler</button>
             </div>
           </div>
-        )}
-
-        <FavoritesPanel
-          favorites={favorites}
-          onRemove={removeFavorite}
-          onClearAll={clearAllFavorites}
-          onVariantsGenerated={handlePromptsGenerated}
-        />
-
-        <div className="mt-8 text-center text-gray-500 text-sm">
-          <p>Made with ❤️ by Valentin</p>
-          <button onClick={clearAllData} className="mt-4 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs rounded font-semibold">🗑️ Tout réinitialiser</button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
