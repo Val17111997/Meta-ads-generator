@@ -45,6 +45,7 @@ export default function Home() {
   const isGeneratingRef = useRef(false);
   const autoModeRef = useRef(false);
   const videoPollingRef = useRef(videoPolling);
+  const promptsTableRef = useRef<{ reload: () => void }>(null);
 
   useEffect(() => { isGeneratingRef.current = isGenerating; }, [isGenerating]);
   useEffect(() => { autoModeRef.current = autoMode; }, [autoMode]);
@@ -62,6 +63,13 @@ export default function Home() {
     generationFailed: '⚠️ La génération n\'a pas abouti, réessaie dans un instant.',
     noPrompts: '✅ Tous les prompts ont été générés !',
     noImages: '📸 Ajoute des images produit pour commencer.',
+  };
+
+  // Callback quand SiteAnalyzer génère des prompts → refresh stats + table
+  const handlePromptsGenerated = () => {
+    loadStats();
+    promptsTableRef.current?.reload();
+    addLog('📋 Nouveaux prompts ajoutés — stats et tableau mis à jour');
   };
 
   useEffect(() => {
@@ -128,7 +136,7 @@ export default function Home() {
     addLog(`🎬 Vidéo ${engineLabel} en cours de génération…`);
     let stopped = false;
     let retryCount = 0;
-    const maxRetries = 30; // ~6 min max de polling
+    const maxRetries = 30;
 
     const pollOnce = async () => {
       if (stopped) return;
@@ -143,7 +151,6 @@ export default function Home() {
       
       const { ok, data } = await safeFetch(pollUrl);
       
-      // Erreur définitive (filtre sécurité, opération expirée, etc.) → arrêter immédiatement
       if (!ok || (data.success === false && data.error)) {
         const errorMsg = data.error || 'Erreur inconnue';
         const isDefinitive = errorMsg.includes('bloqué') || errorMsg.includes('sécurité') || 
@@ -157,7 +164,6 @@ export default function Home() {
           return;
         }
         
-        // Erreur temporaire → retry avec limite
         retryCount++;
         if (retryCount < maxRetries) {
           setTimeout(pollOnce, 15000);
@@ -189,7 +195,7 @@ export default function Home() {
         loadStats();
       } else if (data.pending) {
         retryCount = 0;
-        const pollInterval = isKling ? 10000 : 12000; // Kling is a bit faster
+        const pollInterval = isKling ? 10000 : 12000;
         setTimeout(pollOnce, pollInterval);
       } else {
         retryCount++;
@@ -267,7 +273,6 @@ export default function Home() {
     const { ok, data } = await safeFetch('/api/stats');
     if (ok) {
       setStats({ generated: data.generated || 0, remaining: data.remaining || 0, total: data.total || 0 });
-      addLog(`📊 Stats: ${data.total || 0} prompts, ${data.remaining || 0} en attente`);
     }
   }
 
@@ -321,6 +326,8 @@ export default function Home() {
           setStats(prev => ({ generated: prev.generated + 1, remaining: data.remaining, total: prev.total }));
           addLog(`✅ Média généré avec succès`);
         }
+        // Refresh table pour voir le prompt passer en "generated"
+        promptsTableRef.current?.reload();
       } else {
         const msg = data.message || '';
         if (msg.includes('Aucun prompt') || msg.includes('en attente')) {
@@ -399,7 +406,6 @@ export default function Home() {
   function handleGroupDragLeave(e: React.DragEvent) {
     e.preventDefault();
     e.stopPropagation();
-    // Seulement si on quitte vraiment la zone (pas un enfant)
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = e.clientX, y = e.clientY;
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
@@ -512,8 +518,8 @@ export default function Home() {
           <p className="text-gray-600 text-lg">Powered by Google Gemini AI + Supabase</p>
         </div>
 
-        <SiteAnalyzer />
-        <PromptsTable productGroups={Object.keys(productGroups)} />
+        <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} />
+        <PromptsTable ref={promptsTableRef} productGroups={Object.keys(productGroups)} />
 
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-6 text-center hover:scale-105 transition-transform">
@@ -528,12 +534,6 @@ export default function Home() {
             <div className="text-5xl font-bold text-blue-600 mb-2">{stats.total}</div>
             <div className="text-sm text-gray-600 uppercase">📊 Total</div>
           </div>
-        </div>
-
-        <div className="mb-6">
-          <button onClick={loadStats} disabled={isGenerating} className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-semibold transition-all hover:scale-105 active:scale-95 shadow-lg disabled:opacity-50">
-            🔄 Actualiser les stats
-          </button>
         </div>
 
         {stats.total === 0 && (

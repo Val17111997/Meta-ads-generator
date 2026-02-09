@@ -53,6 +53,7 @@ const CREATIVE_CONCEPTS = [
   'Tutorial/How-to - step by step demonstration'
 ];
 
+// ── Étape 1 : Fetch le contenu du site ──
 async function fetchWebsite(url: string): Promise<string> {
   try {
     let normalizedUrl = url;
@@ -96,41 +97,130 @@ async function fetchWebsite(url: string): Promise<string> {
   }
 }
 
-async function callClaude(
-  siteContent: string, 
-  siteUrl: string, 
-  existingCount: number = 0,
-  contentType: 'photo' | 'video' | 'both' = 'both',
-  promptCount: number = 20
-): Promise<{ analysis: SiteAnalysis; prompts: PromptItem[] }> {
+// ── Étape 2a : Analyser le site (sans générer de prompts) ──
+async function analyzeWithClaude(siteContent: string, siteUrl: string): Promise<SiteAnalysis> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY non configurée');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY non configurée');
+
+  const systemPrompt = `Tu es un expert en marketing digital. Analyse le contenu de ce site web et extrais les informations clés de la marque.
+
+FORMAT DE RÉPONSE (JSON strict) :
+{
+  "brandName": "nom de la marque",
+  "positioning": "positionnement en 1-2 phrases",
+  "usps": ["USP 1", "USP 2", "USP 3"],
+  "values": ["valeur 1", "valeur 2", "valeur 3"],
+  "products": ["produit/service 1", "produit/service 2", "produit/service 3"],
+  "targetAudience": "description de la cible principale",
+  "tone": "ton de communication de la marque",
+  "socialProof": ["preuve sociale 1", "preuve sociale 2"]
+}
+
+Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
+
+  const userMessage = `Analyse ce site web.\n\nURL : ${siteUrl}\n\nCONTENU :\n${siteContent}`;
+
+  console.log('🤖 Appel Claude API (analyse uniquement)...');
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: userMessage }],
+      system: systemPrompt,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Erreur Claude API:', errorText);
+    throw new Error('Claude API error: ' + response.status);
   }
-  
+
+  const data = await response.json();
+  const content = data.content[0]?.text;
+  if (!content) throw new Error('Réponse Claude vide');
+
+  console.log('✅ Analyse reçue');
+
+  const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  return JSON.parse(cleanContent);
+}
+
+// ── Étape 2b : Générer des prompts à partir d'une analyse existante ──
+async function generatePromptsWithClaude(
+  analysis: SiteAnalysis,
+  siteUrl: string,
+  existingCount: number,
+  contentType: 'photo' | 'video' | 'both',
+  promptCount: number
+): Promise<PromptItem[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY non configurée');
+
   const conceptsList = CREATIVE_CONCEPTS.map((c, i) => (i + 1) + '. ' + c).join('\n');
-  
-  const variationNote = existingCount > 0 
-    ? '\n\nIMPORTANT: Cette marque a déjà ' + existingCount + ' prompts. Génère des prompts DIFFÉRENTS et NOUVEAUX, avec des angles et concepts variés que tu n\'as pas encore utilisés.'
+
+  const variationNote = existingCount > 0
+    ? `\n\nIMPORTANT: Cette marque a déjà ${existingCount} prompts en base. Génère des prompts DIFFÉRENTS et NOUVEAUX, avec des angles et concepts variés.`
     : '';
 
-  // Instructions spécifiques selon le type de contenu
   let typeInstruction = '';
   if (contentType === 'photo') {
-    typeInstruction = '\n\nTYPE DE CONTENU : Génère UNIQUEMENT des prompts de type "photo". Aucun prompt vidéo.\nOptimise les prompts pour la génération d\'images fixes (compositions, éclairages, angles de vue).';
+    typeInstruction = '\n\nTYPE : Génère UNIQUEMENT des prompts "photo". Optimise pour images fixes : compositions, éclairages, angles de vue.';
   } else if (contentType === 'video') {
-    typeInstruction = '\n\nTYPE DE CONTENU : Génère UNIQUEMENT des prompts de type "video". Aucun prompt photo.\nOptimise les prompts pour la vidéo : mouvements de caméra, actions, transitions, séquences. Décris des scènes dynamiques avec du mouvement.';
+    typeInstruction = '\n\nTYPE : Génère UNIQUEMENT des prompts "video". Optimise pour vidéo : mouvements de caméra, actions, transitions, séquences dynamiques.';
   } else {
-    typeInstruction = '\n\nTYPE DE CONTENU : Génère un MIX de prompts photo ET vidéo (environ 50/50). Indique le type approprié pour chaque prompt.';
+    typeInstruction = '\n\nTYPE : Génère un MIX photo ET vidéo (environ 50/50).';
   }
-  
-  const systemPrompt = 'Tu es un expert en marketing digital et création de contenu publicitaire pour les réseaux sociaux (Meta Ads, TikTok, Instagram).\n\nTa mission : analyser un site web de marque et générer ' + promptCount + ' prompts créatifs pour la génération d\'images et vidéos publicitaires avec l\'IA (Gemini/Veo).\n\nCONCEPTS CRÉATIFS 2026 À UTILISER :\n' + conceptsList + typeInstruction + '\n\nRÈGLES POUR LES PROMPTS :\n- Chaque prompt doit être en ANGLAIS (meilleur pour les modèles IA)\n- Décrire précisément la scène visuelle, l\'éclairage, l\'ambiance, le cadrage\n- Mentionner le produit de manière naturelle sans forcer\n- Varier les angles marketing : bénéfices, émotions, social proof, lifestyle\n- Adapter au ton et positionnement de la marque\n- Finir chaque prompt par "no text, no watermark" pour éviter les textes générés\n- Format : descriptions visuelles détaillées de 2-4 phrases' + variationNote + '\n\nFORMAT DE RÉPONSE (JSON strict) :\n{\n  "analysis": {\n    "brandName": "nom de la marque",\n    "positioning": "positionnement en 1 phrase",\n    "usps": ["USP 1", "USP 2", "USP 3"],\n    "values": ["valeur 1", "valeur 2"],\n    "products": ["produit 1", "produit 2"],\n    "targetAudience": "cible principale",\n    "tone": "ton de communication",\n    "socialProof": ["preuve sociale 1", "preuve sociale 2"]\n  },\n  "prompts": [\n    {\n      "prompt": "le prompt créatif complet en anglais",\n      "angle": "nom de l\'angle marketing",\n      "concept": "concept créatif utilisé",\n      "type": "photo ou video",\n      "format": "9:16 ou 1:1 ou 16:9"\n    }\n  ]\n}\n\nGénère EXACTEMENT ' + promptCount + ' prompts variés couvrant différents angles et concepts.';
 
-  const userMessage = 'Analyse ce site web et génère ' + promptCount + ' prompts marketing créatifs.\n\nURL du site : ' + siteUrl + '\n\nCONTENU DU SITE :\n' + siteContent + '\n\nRéponds UNIQUEMENT avec le JSON demandé, sans texte avant ou après.';
+  const systemPrompt = `Tu es un expert en création de contenu publicitaire pour Meta Ads, TikTok, Instagram.
 
-  console.log('🤖 Appel Claude API... (type: ' + contentType + ', count: ' + promptCount + ')');
-  
+MARQUE ANALYSÉE :
+- Nom : ${analysis.brandName}
+- Positionnement : ${analysis.positioning}
+- USPs : ${analysis.usps.join(', ')}
+- Valeurs : ${analysis.values.join(', ')}
+- Produits : ${analysis.products.join(', ')}
+- Cible : ${analysis.targetAudience}
+- Ton : ${analysis.tone}
+
+CONCEPTS CRÉATIFS 2026 :
+${conceptsList}
+${typeInstruction}
+
+RÈGLES :
+- Prompts en ANGLAIS
+- Descriptions visuelles détaillées de 2-4 phrases
+- Mentionner le produit naturellement
+- Varier angles marketing : bénéfices, émotions, social proof, lifestyle
+- Finir chaque prompt par "no text, no watermark"
+${variationNote}
+
+FORMAT JSON strict :
+{
+  "prompts": [
+    {
+      "prompt": "le prompt créatif en anglais",
+      "angle": "angle marketing",
+      "concept": "concept créatif",
+      "type": "photo ou video",
+      "format": "9:16 ou 1:1 ou 16:9"
+    }
+  ]
+}
+
+Génère EXACTEMENT ${promptCount} prompts variés.`;
+
+  const userMessage = `Génère ${promptCount} prompts marketing créatifs pour ${analysis.brandName} (${siteUrl}).\n\nRéponds UNIQUEMENT avec le JSON.`;
+
+  console.log(`🤖 Appel Claude API (${promptCount} prompts ${contentType})...`);
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -141,42 +231,29 @@ async function callClaude(
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4000,
-      messages: [
-        { role: 'user', content: userMessage }
-      ],
+      messages: [{ role: 'user', content: userMessage }],
       system: systemPrompt,
     }),
   });
-  
+
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Erreur Claude API:', errorText);
     throw new Error('Claude API error: ' + response.status);
   }
-  
+
   const data = await response.json();
   const content = data.content[0]?.text;
-  
-  if (!content) {
-    throw new Error('Réponse Claude vide');
-  }
-  
-  console.log('✅ Réponse Claude reçue');
-  
-  try {
-    const cleanContent = content
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim();
-    
-    const result = JSON.parse(cleanContent);
-    return result;
-  } catch (parseError) {
-    console.error('Erreur parsing JSON:', content.slice(0, 500));
-    throw new Error('Impossible de parser la réponse Claude');
-  }
+  if (!content) throw new Error('Réponse Claude vide');
+
+  console.log('✅ Prompts reçus');
+
+  const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const result = JSON.parse(cleanContent);
+  return result.prompts;
 }
 
+// ── Supabase helpers ──
 async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): Promise<number> {
   const clientId = process.env.CLIENT_ID;
   if (!clientId) throw new Error('CLIENT_ID non configuré');
@@ -193,7 +270,7 @@ async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): P
     image_url: null,
   }));
 
-  const { data, error } = await getSupabase()
+  const { error } = await getSupabase()
     .from('prompts')
     .insert(rows)
     .select();
@@ -217,67 +294,106 @@ async function countExistingPrompts(brandName: string): Promise<number> {
     .eq('client_id', clientId)
     .eq('brand', brandName);
 
-  if (error) {
-    console.error('Erreur count:', error);
-    return 0;
-  }
-
+  if (error) return 0;
   return count || 0;
 }
 
+// ============================================================
+// HANDLER POST
+// ============================================================
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { url, brandOverride, contentType = 'both', promptCount = 20 } = body;
-    
-    if (!url) {
+    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride } = body;
+
+    // ── ACTION : ANALYZE (étape 1) ──
+    if (action === 'analyze') {
+      if (!url) {
+        return NextResponse.json({ success: false, error: 'URL du site requise' }, { status: 400 });
+      }
+
+      console.log('🌐 Analyse du site: ' + url);
+
+      const siteContent = await fetchWebsite(url);
+      console.log('📄 Contenu récupéré: ' + siteContent.length + ' caractères');
+
+      const analysis = await analyzeWithClaude(siteContent, url);
+      console.log('✅ Analyse terminée pour: ' + analysis.brandName);
+
+      const existingCount = await countExistingPrompts(analysis.brandName);
+
       return NextResponse.json({
-        success: false,
-        error: 'URL du site requise'
-      }, { status: 400 });
+        success: true,
+        action: 'analyze',
+        analysis,
+        existingCount,
+      });
     }
-    
-    console.log('🌐 Analyse du site: ' + url + ' (type: ' + contentType + ', count: ' + promptCount + ')');
-    
-    // Étape 1 : Fetch le contenu du site
-    console.log('📥 Récupération du contenu...');
+
+    // ── ACTION : GENERATE (étape 2) ──
+    if (action === 'generate') {
+      if (!existingAnalysis) {
+        return NextResponse.json({ success: false, error: 'Analyse manquante. Analyse le site d\'abord.' }, { status: 400 });
+      }
+      if (!url) {
+        return NextResponse.json({ success: false, error: 'URL manquante' }, { status: 400 });
+      }
+
+      const brandName = brandOverride || existingAnalysis.brandName;
+      const existingCount = await countExistingPrompts(brandName);
+
+      console.log(`🎯 Génération de ${promptCount} prompts ${contentType} pour ${brandName}`);
+
+      const prompts = await generatePromptsWithClaude(
+        existingAnalysis,
+        url,
+        existingCount,
+        contentType,
+        promptCount
+      );
+
+      console.log('💾 Ajout à Supabase...');
+      const addedCount = await addPromptsToSupabase(prompts, brandName);
+
+      return NextResponse.json({
+        success: true,
+        action: 'generate',
+        prompts,
+        promptCount: prompts.length,
+        addedToDatabase: addedCount,
+        totalForBrand: existingCount + addedCount,
+        contentType,
+        message: `${prompts.length} prompts ${contentType} générés pour ${brandName}`,
+      });
+    }
+
+    // ── LEGACY : ancien comportement (analyze + generate en un seul appel) ──
+    if (!url) {
+      return NextResponse.json({ success: false, error: 'URL du site requise' }, { status: 400 });
+    }
+
+    console.log('🌐 [Legacy] Analyse + génération pour: ' + url);
+
     const siteContent = await fetchWebsite(url);
-    console.log('📄 Contenu récupéré: ' + siteContent.length + ' caractères');
-    
-    // Étape 2 : Compter les existants
-    // On fait un pré-analyse rapide pour avoir le brandName
-    const existingCount = 0; // sera mis à jour après l'analyse
-    
-    // Étape 3 : Analyser avec Claude
-    console.log('🧠 Analyse avec Claude...');
-    const { analysis, prompts } = await callClaude(siteContent, url, existingCount, contentType, promptCount);
+    const analysis = await analyzeWithClaude(siteContent, url);
     const brandName = brandOverride || analysis.brandName;
-    
-    const realExistingCount = await countExistingPrompts(brandName);
-    console.log('📊 Prompts existants pour ' + brandName + ': ' + realExistingCount);
-    console.log('✅ ' + prompts.length + ' nouveaux prompts générés (' + contentType + ')');
-    
-    // Étape 4 : Ajouter à Supabase
-    console.log('💾 Ajout à Supabase...');
+    const existingCount = await countExistingPrompts(brandName);
+    const prompts = await generatePromptsWithClaude(analysis, url, existingCount, 'both', 20);
     const addedCount = await addPromptsToSupabase(prompts, brandName);
-    
+
     return NextResponse.json({
       success: true,
       analysis,
       prompts,
       promptCount: prompts.length,
       addedToDatabase: addedCount,
-      totalForBrand: realExistingCount + addedCount,
-      contentType,
-      message: prompts.length + ' prompts ' + contentType + ' générés pour ' + brandName,
+      totalForBrand: existingCount + addedCount,
+      message: prompts.length + ' prompts générés pour ' + brandName,
     });
-    
+
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('❌ Erreur:', errorMessage);
-    return NextResponse.json({
-      success: false,
-      error: errorMessage
-    }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
