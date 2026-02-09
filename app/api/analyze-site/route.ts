@@ -165,7 +165,8 @@ async function generatePromptsWithClaude(
   existingCount: number,
   contentType: 'photo' | 'video' | 'both',
   promptCount: number,
-  targetProduct?: string
+  targetProduct?: string,
+  productPageContent?: string
 ): Promise<PromptItem[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY non configurée');
@@ -185,6 +186,9 @@ IMPORTANT : TOUS les prompts doivent mettre en scène SPÉCIFIQUEMENT ce produit
 - Les visuels doivent être cohérents avec ce type de produit
 - Ne mélange PAS avec d'autres catégories de produits de la marque
 - Adapte les compositions, décors et mises en scène à "${targetProduct}"`;
+    if (productPageContent) {
+      productInstruction += `\n\nINFORMATIONS DÉTAILLÉES DU PRODUIT (extraites de la page produit) :\n${productPageContent.slice(0, 5000)}\n\nUtilise ces détails pour rendre les prompts plus précis et pertinents : caractéristiques, couleurs, matières, usages, etc.`;
+    }
   } else {
     productInstruction = `\n\nPRODUITS : ${analysis.products.join(', ')}
 Répartis les prompts entre les différents produits de la marque.`;
@@ -419,7 +423,7 @@ async function countExistingPrompts(brandName: string): Promise<number> {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride, sourcePrompts, targetProduct } = body;
+    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride, sourcePrompts, targetProduct, productUrl } = body;
 
     // ── ACTION : ANALYZE (étape 1) ──
     if (action === 'analyze') {
@@ -460,13 +464,26 @@ export async function POST(request: Request) {
       const productLabel = targetProduct ? ` → "${targetProduct}"` : '';
       console.log(`🎯 Génération de ${promptCount} prompts ${contentType}${productLabel} pour ${brandName}`);
 
+      // Fetch product page content if URL provided
+      let productPageContent: string | undefined;
+      if (productUrl) {
+        try {
+          console.log(`📄 Récupération de la page produit: ${productUrl}`);
+          productPageContent = await fetchWebsite(productUrl);
+          console.log(`✅ Page produit récupérée: ${productPageContent.length} caractères`);
+        } catch (e) {
+          console.warn(`⚠️ Impossible de charger la page produit: ${productUrl}`);
+        }
+      }
+
       const prompts = await generatePromptsWithClaude(
         existingAnalysis,
         url,
         existingCount,
         contentType,
         promptCount,
-        targetProduct
+        targetProduct,
+        productPageContent
       );
 
       console.log('💾 Ajout à Supabase...');

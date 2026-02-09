@@ -24,7 +24,8 @@ interface PromptItem {
 interface SiteAnalyzerProps {
   onPromptsGenerated?: () => void;
   productGroups?: string[];
-  onCreateGroups?: (groups: string[]) => void;
+  onCreateGroups?: (groups: string[], urls?: { [name: string]: string }) => void;
+  productGroupUrls?: { [name: string]: string };
 }
 
 const LS_KEY = 'siteAnalyzerState';
@@ -125,7 +126,7 @@ function EditableList({ label, items, onChange }: { label: string; items: string
 }
 
 // ── Composant principal ──
-export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], onCreateGroups }: SiteAnalyzerProps) {
+export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], onCreateGroups, productGroupUrls = {} }: SiteAnalyzerProps) {
   const [url, setUrl] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<SiteAnalysis | null>(null);
@@ -144,6 +145,15 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [groupsCreated, setGroupsCreated] = useState(false);
 
+  // ── Product group management (checkboxes + URLs for creation) ──
+  const [checkedProducts, setCheckedProducts] = useState<Set<string>>(new Set());
+  const [productUrlDrafts, setProductUrlDrafts] = useState<{ [name: string]: string }>({});
+
+  // ── Manual product addition ──
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [newProductName, setNewProductName] = useState('');
+  const [newProductUrl, setNewProductUrl] = useState('');
+
   // ── Restaurer depuis localStorage ──
   useEffect(() => {
     try {
@@ -158,6 +168,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
         if (data.promptCount) setPromptCount(data.promptCount);
         if (data.selectedProduct) setSelectedProduct(data.selectedProduct);
         if (data.groupsCreated) setGroupsCreated(data.groupsCreated);
+        if (data.productUrlDrafts) setProductUrlDrafts(data.productUrlDrafts);
       }
     } catch {}
     setRestored(true);
@@ -167,26 +178,64 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
   useEffect(() => {
     if (!restored) return;
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({ url, analysis, existingCount, generatedCounts, generationHistory, promptCount, selectedProduct, groupsCreated }));
+      localStorage.setItem(LS_KEY, JSON.stringify({ url, analysis, existingCount, generatedCounts, generationHistory, promptCount, selectedProduct, groupsCreated, productUrlDrafts }));
     } catch {}
-  }, [url, analysis, existingCount, generatedCounts, generationHistory, promptCount, selectedProduct, groupsCreated, restored]);
+  }, [url, analysis, existingCount, generatedCounts, generationHistory, promptCount, selectedProduct, groupsCreated, productUrlDrafts, restored]);
 
-  // ── Helpers pour modifier l'analyse ──
+  // ── Auto-check all missing groups when analysis arrives ──
+  useEffect(() => {
+    if (analysis && !groupsCreated) {
+      const missing = analysis.products.filter(p => !productGroups.includes(p));
+      setCheckedProducts(new Set(missing));
+    }
+  }, [analysis, productGroups, groupsCreated]);
+
+  // ── Helpers ──
   const updateAnalysis = (field: keyof SiteAnalysis, value: any) => {
     if (!analysis) return;
     setAnalysis({ ...analysis, [field]: value });
   };
 
-  // ── Produits détectés qui ne sont pas encore des groupes ──
   const missingGroups = analysis
     ? analysis.products.filter(p => !productGroups.includes(p))
     : [];
+
+  const toggleProduct = (name: string) => {
+    setCheckedProducts(prev => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
+  };
+
+  const updateProductUrl = (name: string, url: string) => {
+    setProductUrlDrafts(prev => ({ ...prev, [name]: url }));
+  };
+
+  const addManualProduct = () => {
+    if (!newProductName.trim()) return;
+    const name = newProductName.trim();
+    // Add to analysis products list
+    if (analysis && !analysis.products.includes(name)) {
+      updateAnalysis('products', [...analysis.products, name]);
+    }
+    // Store URL if provided
+    if (newProductUrl.trim()) {
+      setProductUrlDrafts(prev => ({ ...prev, [name]: newProductUrl.trim() }));
+    }
+    // Auto-check it
+    setCheckedProducts(prev => new Set([...prev, name]));
+    setNewProductName('');
+    setNewProductUrl('');
+    setShowAddProduct(false);
+  };
 
   const analyzeSite = async () => {
     if (!url.trim()) { setStatus('❌ Entre une URL'); return; }
     setAnalyzing(true); setAnalysis(null); setLastPrompts(null);
     setGenerationHistory([]); setGeneratedCounts({ photo: 0, video: 0, both: 0 });
     setSelectedProduct(''); setGroupsCreated(false);
+    setCheckedProducts(new Set()); setProductUrlDrafts({});
     setStatus('🌐 Connexion au site...');
     try {
       setTimeout(() => setStatus('📥 Récupération du contenu...'), 2000);
@@ -204,13 +253,18 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
   };
 
   const createGroupsFromAnalysis = () => {
-    if (!analysis || !onCreateGroups) return;
-    const newGroups = analysis.products.filter(p => !productGroups.includes(p));
-    if (newGroups.length > 0) {
-      onCreateGroups(newGroups);
-      setGroupsCreated(true);
-      setStatus(`✅ ${newGroups.length} groupe(s) créé(s) ! Ajoute les photos dans l'onglet Assets.`);
-    }
+    if (!onCreateGroups) return;
+    const toCreate = Array.from(checkedProducts).filter(p => !productGroups.includes(p));
+    if (toCreate.length === 0) return;
+    // Collect URLs for the groups being created
+    const urls: { [name: string]: string } = {};
+    toCreate.forEach(name => {
+      const u = productUrlDrafts[name];
+      if (u) urls[name] = u;
+    });
+    onCreateGroups(toCreate, Object.keys(urls).length > 0 ? urls : undefined);
+    setGroupsCreated(true);
+    setStatus(`✅ ${toCreate.length} groupe(s) créé(s) ! Ajoute les photos dans l'onglet Assets.`);
   };
 
   const generatePrompts = async (contentType: 'photo' | 'video' | 'both') => {
@@ -222,6 +276,12 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
     try {
       setTimeout(() => setStatus(`🧠 Claude crée les prompts ${typeLabel}${productLabel}...`), 3000);
       setTimeout(() => setStatus('💾 Ajout à la base de données...'), 15000);
+
+      // Find product URL if available
+      const productUrl = selectedProduct
+        ? (productGroupUrls[selectedProduct] || productUrlDrafts[selectedProduct] || undefined)
+        : undefined;
+
       const response = await fetch('/api/analyze-site', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -231,6 +291,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
           contentType,
           promptCount,
           targetProduct: selectedProduct || undefined,
+          productUrl,
         }),
       });
       const data = await response.json();
@@ -255,6 +316,8 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
   };
   const typeIcon = (type: string) => type === 'photo' ? '📷' : type === 'video' ? '🎬' : '📷🎬';
   const isLoading = analyzing || generating;
+
+  const checkedCount = Array.from(checkedProducts).filter(p => !productGroups.includes(p)).length;
 
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
@@ -316,34 +379,114 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
             )}
           </div>
 
-          {/* ── CRÉER LES GROUPES DE PRODUITS ── */}
-          {onCreateGroups && missingGroups.length > 0 && !groupsCreated && (
+          {/* ── GROUPES DE PRODUITS : détectés + ajout manuel ── */}
+          {onCreateGroups && (missingGroups.length > 0 || showAddProduct) && !groupsCreated && (
             <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="font-bold text-amber-800 text-sm flex items-center gap-2">📂 Groupes de produits détectés</h3>
-                  <p className="text-xs text-amber-600 mt-1">
-                    Ces catégories ne sont pas encore dans tes Assets. Crée-les pour y ajouter les photos et générer des prompts ciblés.
-                  </p>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {missingGroups.map(g => (
-                      <span key={g} className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs rounded-lg font-medium border border-amber-200">{g}</span>
-                    ))}
+              <h3 className="font-bold text-amber-800 text-sm flex items-center gap-2 mb-1">📂 Groupes de produits</h3>
+              <p className="text-xs text-amber-600 mb-3">
+                Coche les produits à créer comme groupes, ajoute l'URL de la page produit si disponible.
+              </p>
+
+              {/* Liste des produits détectés non encore créés */}
+              <div className="space-y-2 mb-3">
+                {missingGroups.map(name => (
+                  <div key={name} className="flex items-center gap-2 bg-white rounded-lg p-2 border border-amber-100">
+                    <input
+                      type="checkbox"
+                      checked={checkedProducts.has(name)}
+                      onChange={() => toggleProduct(name)}
+                      className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-gray-700 min-w-[120px]">{name}</span>
+                    <input
+                      type="url"
+                      value={productUrlDrafts[name] || ''}
+                      onChange={(e) => updateProductUrl(name, e.target.value)}
+                      placeholder="https://www.site.com/produit (optionnel)"
+                      className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 text-gray-500 placeholder:text-gray-300"
+                    />
                   </div>
+                ))}
+              </div>
+
+              {/* Formulaire ajout manuel */}
+              {showAddProduct ? (
+                <div className="flex items-center gap-2 bg-white rounded-lg p-2 border-2 border-dashed border-purple-300 mb-3">
+                  <span className="text-purple-500 text-sm">✚</span>
+                  <input
+                    type="text"
+                    value={newProductName}
+                    onChange={(e) => setNewProductName(e.target.value)}
+                    placeholder="Nom du produit"
+                    className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 min-w-[140px]"
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') addManualProduct(); if (e.key === 'Escape') { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); } }}
+                  />
+                  <input
+                    type="url"
+                    value={newProductUrl}
+                    onChange={(e) => setNewProductUrl(e.target.value)}
+                    placeholder="https://www.site.com/produit (optionnel)"
+                    className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 text-gray-500 placeholder:text-gray-300"
+                    onKeyDown={(e) => { if (e.key === 'Enter') addManualProduct(); }}
+                  />
+                  <button onClick={addManualProduct} disabled={!newProductName.trim()} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Ajouter</button>
+                  <button onClick={() => { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); }} className="px-2 py-1.5 text-gray-400 hover:text-gray-600 text-xs">✕</button>
                 </div>
+              ) : (
+                <button
+                  onClick={() => setShowAddProduct(true)}
+                  className="text-xs text-purple-600 hover:text-purple-800 font-medium hover:bg-purple-50 rounded-lg px-2 py-1 transition-colors mb-3"
+                >
+                  + Ajouter un produit manuellement
+                </button>
+              )}
+
+              {/* Bouton créer */}
+              <div className="flex items-center justify-between pt-2 border-t border-amber-200">
+                <span className="text-xs text-amber-600">{checkedCount} groupe(s) sélectionné(s)</span>
                 <button
                   onClick={createGroupsFromAnalysis}
-                  className="ml-4 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold transition-all hover:shadow-md active:scale-95 flex-shrink-0"
+                  disabled={checkedCount === 0}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold transition-all hover:shadow-md active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  ✅ Créer {missingGroups.length} groupe{missingGroups.length > 1 ? 's' : ''}
+                  ✅ Créer {checkedCount} groupe{checkedCount > 1 ? 's' : ''}
                 </button>
               </div>
             </div>
           )}
 
-          {groupsCreated && missingGroups.length === 0 && (
-            <div className="bg-green-50 rounded-xl p-3 border border-green-200 text-green-700 text-sm font-medium flex items-center gap-2">
-              ✅ Tous les groupes sont créés ! Ajoute les photos dans l'onglet <strong>Assets</strong>.
+          {/* Groupes déjà tous créés */}
+          {onCreateGroups && groupsCreated && missingGroups.length === 0 && (
+            <div className="bg-green-50 rounded-xl p-3 border border-green-200">
+              <div className="flex items-center justify-between">
+                <span className="text-green-700 text-sm font-medium flex items-center gap-2">
+                  ✅ Tous les groupes sont créés ! Ajoute les photos dans l'onglet <strong>Assets</strong>.
+                </span>
+                <button
+                  onClick={() => setShowAddProduct(true)}
+                  className="text-xs text-green-600 hover:text-green-800 font-medium hover:bg-green-100 rounded-lg px-2 py-1 transition-colors"
+                >
+                  + Ajouter un produit
+                </button>
+              </div>
+              {/* Inline add even after groups created */}
+              {showAddProduct && (
+                <div className="flex items-center gap-2 bg-white rounded-lg p-2 border-2 border-dashed border-green-300 mt-2">
+                  <span className="text-green-500 text-sm">✚</span>
+                  <input type="text" value={newProductName} onChange={(e) => setNewProductName(e.target.value)}
+                    placeholder="Nom du produit" autoFocus
+                    className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-400 focus:outline-none min-w-[140px]"
+                    onKeyDown={(e) => { if (e.key === 'Enter') { addManualProduct(); if (onCreateGroups && newProductName.trim()) { onCreateGroups([newProductName.trim()], newProductUrl.trim() ? { [newProductName.trim()]: newProductUrl.trim() } : undefined); } } if (e.key === 'Escape') { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); } }} />
+                  <input type="url" value={newProductUrl} onChange={(e) => setNewProductUrl(e.target.value)}
+                    placeholder="https://... (optionnel)"
+                    className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none text-gray-500 placeholder:text-gray-300"
+                    onKeyDown={(e) => { if (e.key === 'Enter') { const n = newProductName.trim(); if (n && onCreateGroups) { if (analysis && !analysis.products.includes(n)) updateAnalysis('products', [...analysis.products, n]); if (newProductUrl.trim()) setProductUrlDrafts(prev => ({ ...prev, [n]: newProductUrl.trim() })); onCreateGroups([n], newProductUrl.trim() ? { [n]: newProductUrl.trim() } : undefined); setNewProductName(''); setNewProductUrl(''); setShowAddProduct(false); } } }} />
+                  <button onClick={() => { const n = newProductName.trim(); if (n && onCreateGroups) { if (analysis && !analysis.products.includes(n)) updateAnalysis('products', [...analysis.products, n]); if (newProductUrl.trim()) setProductUrlDrafts(prev => ({ ...prev, [n]: newProductUrl.trim() })); onCreateGroups([n], newProductUrl.trim() ? { [n]: newProductUrl.trim() } : undefined); setNewProductName(''); setNewProductUrl(''); setShowAddProduct(false); } }}
+                    disabled={!newProductName.trim()} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40">Créer</button>
+                  <button onClick={() => { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); }} className="text-gray-400 hover:text-gray-600 text-xs px-1">✕</button>
+                </div>
+              )}
             </div>
           )}
 
@@ -380,7 +523,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
                   >
                     Tous les produits
                   </button>
-                  {/* Show product groups from Assets first (they have photos) */}
+                  {/* Product groups from Assets (have photos) */}
                   {productGroups.map(g => (
                     <button
                       key={g}
@@ -393,9 +536,10 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Photos uploadées"></span>
                       {g}
+                      {(productGroupUrls[g] || productUrlDrafts[g]) && <span className="text-[10px] text-blue-400" title="URL produit renseignée">🔗</span>}
                     </button>
                   ))}
-                  {/* Show detected products that aren't in groups yet */}
+                  {/* Detected products not yet in groups */}
                   {analysis.products
                     .filter(p => !productGroups.includes(p))
                     .map(p => (
@@ -410,6 +554,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
                       >
                         <span className="w-1.5 h-1.5 rounded-full bg-gray-300" title="Pas encore de photos"></span>
                         {p}
+                        {productUrlDrafts[p] && <span className="text-[10px] text-blue-400" title="URL produit renseignée">🔗</span>}
                       </button>
                     ))}
                 </div>

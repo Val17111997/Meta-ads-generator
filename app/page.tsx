@@ -48,6 +48,7 @@ export default function Home() {
   const [includeLogo, setIncludeLogo] = useState(false);
 
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [productGroupUrls, setProductGroupUrls] = useState<{ [name: string]: string }>({});
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
 
   const isGeneratingRef = useRef(false);
@@ -77,6 +78,7 @@ export default function Home() {
   // ── Persistence ──
   useEffect(() => { favorites.length > 0 ? localStorage.setItem('favorites', JSON.stringify(favorites)) : localStorage.removeItem('favorites'); }, [favorites]);
   useEffect(() => { Object.keys(productGroups).length > 0 && localStorage.setItem('productGroups', JSON.stringify(productGroups)); }, [productGroups]);
+  useEffect(() => { Object.keys(productGroupUrls).length > 0 ? localStorage.setItem('productGroupUrls', JSON.stringify(productGroupUrls)) : localStorage.removeItem('productGroupUrls'); }, [productGroupUrls]);
   useEffect(() => { brandAssets.length > 0 && localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); }, [brandAssets]);
   useEffect(() => {
     if (generatedImages.length > 0 && generatedImages.length < 20) {
@@ -88,7 +90,7 @@ export default function Home() {
   useEffect(() => {
     loadStats();
     const r = (k: string, s: (v: any) => void) => { const v = localStorage.getItem(k); if (v) try { s(JSON.parse(v)); } catch { localStorage.removeItem(k); } };
-    r('productGroups', setProductGroups); r('brandAssets', setBrandAssets); r('generatedImages', setGeneratedImages); r('favorites', setFavorites); r('videoPolling', setVideoPolling);
+    r('productGroups', setProductGroups); r('productGroupUrls', setProductGroupUrls); r('brandAssets', setBrandAssets); r('generatedImages', setGeneratedImages); r('favorites', setFavorites); r('videoPolling', setVideoPolling);
     const b = localStorage.getItem('batchCount'); if (b) setBatchCount(parseInt(b));
   }, []);
 
@@ -162,12 +164,15 @@ export default function Home() {
 
   // ── Groups ──
   function createNewGroup() { if (!newGroupName.trim() || productGroups[newGroupName]) return; setProductGroups(prev => ({ ...prev, [newGroupName]: [] })); setNewGroupName(''); setShowNewGroupModal(false); }
-  function handleCreateGroups(groups: string[]) {
+  function handleCreateGroups(groups: string[], urls?: { [name: string]: string }) {
     setProductGroups(prev => {
       const updated = { ...prev };
       groups.forEach(g => { if (!updated[g]) updated[g] = []; });
       return updated;
     });
+    if (urls) {
+      setProductGroupUrls(prev => ({ ...prev, ...urls }));
+    }
   }
   function processFilesForGroup(g: string, files: FileList|File[]) {
     const arr = Array.from(files).filter(f => f.type.startsWith('image/')); if (!arr.length) return;
@@ -180,7 +185,7 @@ export default function Home() {
   function handleGroupDragLeave(e: React.DragEvent) { e.preventDefault(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); if (e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom) setDragOverGroup(null); }
   function deleteGroupImage(g: string, n: string) { setProductGroups(prev => ({ ...prev, [g]: prev[g].filter(i => i.name !== n) })); }
   function deleteGroup(g: string) { if (confirm(`Supprimer "${g}" ?`)) setProductGroups(prev => { const x = { ...prev }; delete x[g]; return x; }); }
-  function clearAllProductGroups() { if (confirm('Tout supprimer ?')) { setProductGroups({}); localStorage.removeItem('productGroups'); } }
+  function clearAllProductGroups() { if (confirm('Tout supprimer ?')) { setProductGroups({}); setProductGroupUrls({}); localStorage.removeItem('productGroups'); localStorage.removeItem('productGroupUrls'); } }
 
   // ── Brand ──
   function handleBrandAssetUpload(e: React.ChangeEvent<HTMLInputElement>, type: 'logo'|'palette'|'style') {
@@ -197,7 +202,7 @@ export default function Home() {
   function downloadSingle(url: string, ts: number) { try { const a = document.createElement('a'); a.href=url; a.download=`meta-ad-${ts}.${url.startsWith('data:video')?'mp4':'png'}`; document.body.appendChild(a); a.click(); document.body.removeChild(a); } catch {} }
   function downloadAll() { if (generatedImages.length) createAndDownloadZip(generatedImages, batchCount); }
   function clearGallery() { if (confirm('Vider ?')) { setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); localStorage.removeItem('generatedImages'); } }
-  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','brandAssets','generatedImages','batchCount','videoPolling','favorites','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); } }
+  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','generatedImages','batchCount','videoPolling','favorites','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); } }
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
     try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meta-ads-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
   }
@@ -292,7 +297,7 @@ export default function Home() {
           {activeTab === 'strategy' && (
             <div className="space-y-6">
               <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Stratégie de contenu</h2><p className="text-gray-400 text-sm mt-1">Analyse un site et génère des prompts optimisés</p></div>
-              <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} productGroups={Object.keys(productGroups)} onCreateGroups={handleCreateGroups} />
+              <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} productGroups={Object.keys(productGroups)} onCreateGroups={handleCreateGroups} productGroupUrls={productGroupUrls} />
             </div>
           )}
 
