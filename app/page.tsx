@@ -76,10 +76,10 @@ export default function Home() {
   function clearAllFavorites() { if (confirm('Supprimer tous les favoris ?')) { setFavorites([]); localStorage.removeItem('favorites'); } }
 
   // ── Persistence ──
-  useEffect(() => { favorites.length > 0 ? localStorage.setItem('favorites', JSON.stringify(favorites)) : localStorage.removeItem('favorites'); }, [favorites]);
-  useEffect(() => { Object.keys(productGroups).length > 0 && localStorage.setItem('productGroups', JSON.stringify(productGroups)); }, [productGroups]);
+  useEffect(() => { try { favorites.length > 0 ? localStorage.setItem('favorites', JSON.stringify(favorites)) : localStorage.removeItem('favorites'); } catch { console.warn('⚠️ localStorage plein (favorites)'); } }, [favorites]);
+  useEffect(() => { if (Object.keys(productGroups).length > 0) { try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch (e) { console.warn('⚠️ localStorage plein (productGroups), nettoyage...'); try { localStorage.removeItem('generatedImages'); localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch { console.error('localStorage irrécupérable'); } } } }, [productGroups]);
   useEffect(() => { Object.keys(productGroupUrls).length > 0 ? localStorage.setItem('productGroupUrls', JSON.stringify(productGroupUrls)) : localStorage.removeItem('productGroupUrls'); }, [productGroupUrls]);
-  useEffect(() => { brandAssets.length > 0 && localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); }, [brandAssets]);
+  useEffect(() => { if (brandAssets.length > 0) { try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } catch { console.warn('⚠️ localStorage plein (brandAssets)'); } } }, [brandAssets]);
   useEffect(() => {
     if (generatedImages.length > 0 && generatedImages.length < 20) {
       (async () => { try { const c = await Promise.all(generatedImages.map(async img => ({ ...img, url: img.mediaType === 'video' ? img.url : await compressImage(img.url) }))); localStorage.setItem('generatedImages', JSON.stringify(c)); localStorage.setItem('batchCount', batchCount.toString()); } catch {} })();
@@ -177,7 +177,7 @@ export default function Home() {
   function processFilesForGroup(g: string, files: FileList|File[]) {
     const arr = Array.from(files).filter(f => f.type.startsWith('image/')); if (!arr.length) return;
     setUploading(true); let d = 0;
-    arr.forEach(f => { const r = new FileReader(); r.onload = async e => { const c = await compressImage(e.target?.result as string); setProductGroups(prev => ({ ...prev, [g]: [...(prev[g]||[]), { name: f.name, url: c }] })); if (++d >= arr.length) setUploading(false); }; r.readAsDataURL(f); });
+    arr.forEach(f => { const r = new FileReader(); r.onload = async e => { try { const c = await compressImage(e.target?.result as string); setProductGroups(prev => ({ ...prev, [g]: [...(prev[g]||[]), { name: f.name, url: c }] })); } catch (err) { console.error('Erreur compression image:', f.name, err); } if (++d >= arr.length) setUploading(false); }; r.onerror = () => { console.error('Erreur lecture fichier:', f.name); if (++d >= arr.length) setUploading(false); }; r.readAsDataURL(f); });
   }
   function handleGroupImageUpload(g: string, e: React.ChangeEvent<HTMLInputElement>) { if (e.target.files?.length) processFilesForGroup(g, e.target.files); }
   function handleGroupDrop(g: string, e: React.DragEvent) { e.preventDefault(); e.stopPropagation(); setDragOverGroup(null); if (e.dataTransfer.files?.length) processFilesForGroup(g, e.dataTransfer.files); }
@@ -190,7 +190,7 @@ export default function Home() {
   // ── Brand ──
   function handleBrandAssetUpload(e: React.ChangeEvent<HTMLInputElement>, type: 'logo'|'palette'|'style') {
     if (!e.target.files?.length) return;
-    Array.from(e.target.files).forEach(f => { const r = new FileReader(); r.onload = ev => setBrandAssets(prev => [...prev, { name: f.name, url: ev.target?.result as string, type }]); r.readAsDataURL(f); });
+    Array.from(e.target.files).forEach(f => { const r = new FileReader(); r.onload = ev => { try { setBrandAssets(prev => [...prev, { name: f.name, url: ev.target?.result as string, type }]); } catch (err) { console.error('Erreur brand asset:', f.name, err); } }; r.onerror = () => console.error('Erreur lecture brand asset:', f.name); r.readAsDataURL(f); });
   }
   function deleteBrandAsset(n: string) { setBrandAssets(prev => prev.filter(a => a.name !== n)); }
   function clearBrandAssets() { if (confirm('Supprimer ?')) { setBrandAssets([]); localStorage.removeItem('brandAssets'); } }

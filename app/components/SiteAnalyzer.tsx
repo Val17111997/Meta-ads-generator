@@ -230,6 +230,28 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
     setShowAddProduct(false);
   };
 
+  // Add product AND create the group immediately
+  const handleAddAndCreate = () => {
+    if (!newProductName.trim() || !onCreateGroups) return;
+    const name = newProductName.trim();
+    const productUrl = newProductUrl.trim();
+    // Add to analysis
+    if (analysis && !analysis.products.includes(name)) {
+      updateAnalysis('products', [...analysis.products, name]);
+    }
+    // Store URL
+    if (productUrl) {
+      setProductUrlDrafts(prev => ({ ...prev, [name]: productUrl }));
+    }
+    // Create group immediately
+    onCreateGroups([name], productUrl ? { [name]: productUrl } : undefined);
+    // Remove from checked (it's now created)
+    setCheckedProducts(prev => { const next = new Set(prev); next.delete(name); return next; });
+    setNewProductName('');
+    setNewProductUrl('');
+    setShowAddProduct(false);
+  };
+
   const analyzeSite = async () => {
     if (!url.trim()) { setStatus('❌ Entre une URL'); return; }
     setAnalyzing(true); setAnalysis(null); setLastPrompts(null);
@@ -379,40 +401,63 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
             )}
           </div>
 
-          {/* ── GROUPES DE PRODUITS : détectés + ajout manuel ── */}
-          {onCreateGroups && (missingGroups.length > 0 || showAddProduct) && !groupsCreated && (
-            <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-              <h3 className="font-bold text-amber-800 text-sm flex items-center gap-2 mb-1">📂 Groupes de produits</h3>
-              <p className="text-xs text-amber-600 mb-3">
-                Coche les produits à créer comme groupes, ajoute l'URL de la page produit si disponible.
-              </p>
-
-              {/* Liste des produits détectés non encore créés */}
-              <div className="space-y-2 mb-3">
-                {missingGroups.map(name => (
-                  <div key={name} className="flex items-center gap-2 bg-white rounded-lg p-2 border border-amber-100">
-                    <input
-                      type="checkbox"
-                      checked={checkedProducts.has(name)}
-                      onChange={() => toggleProduct(name)}
-                      className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                    />
-                    <span className="text-sm font-medium text-gray-700 min-w-[120px]">{name}</span>
-                    <input
-                      type="url"
-                      value={productUrlDrafts[name] || ''}
-                      onChange={(e) => updateProductUrl(name, e.target.value)}
-                      placeholder="https://www.site.com/produit (optionnel)"
-                      className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 text-gray-500 placeholder:text-gray-300"
-                    />
-                  </div>
-                ))}
+          {/* ── GROUPES DE PRODUITS : toujours visible après analyse ── */}
+          {onCreateGroups && (
+            <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-gray-800 text-sm flex items-center gap-2">📂 Groupes de produits</h3>
+                {productGroups.length > 0 && (
+                  <span className="text-xs text-green-600 font-medium">{productGroups.length} groupe(s) créé(s)</span>
+                )}
               </div>
 
-              {/* Formulaire ajout manuel */}
+              {/* Groupes déjà créés (avec photos) */}
+              {productGroups.length > 0 && (
+                <div className="mb-3">
+                  <span className="text-xs text-gray-400 font-medium mb-1.5 block">Groupes existants :</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {productGroups.map(g => (
+                      <span key={g} className="px-2.5 py-1 bg-green-50 text-green-700 text-xs rounded-lg font-medium border border-green-200 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                        {g}
+                        {(productGroupUrls[g] || productUrlDrafts[g]) && <span className="text-blue-400 text-[10px]">🔗</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Produits détectés pas encore créés */}
+              {missingGroups.length > 0 && (
+                <div className="mb-3">
+                  <span className="text-xs text-amber-600 font-medium mb-1.5 block">Produits détectés — à créer :</span>
+                  <div className="space-y-2">
+                    {missingGroups.map(name => (
+                      <div key={name} className="flex items-center gap-2 bg-amber-50 rounded-lg p-2 border border-amber-100">
+                        <input
+                          type="checkbox"
+                          checked={checkedProducts.has(name)}
+                          onChange={() => toggleProduct(name)}
+                          className="w-4 h-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                        />
+                        <span className="text-sm font-medium text-gray-700 min-w-[120px]">{name}</span>
+                        <input
+                          type="url"
+                          value={productUrlDrafts[name] || ''}
+                          onChange={(e) => updateProductUrl(name, e.target.value)}
+                          placeholder="https://www.site.com/produit (optionnel)"
+                          className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 text-gray-500 placeholder:text-gray-300 bg-white"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Formulaire ajout manuel — toujours accessible */}
               {showAddProduct ? (
-                <div className="flex items-center gap-2 bg-white rounded-lg p-2 border-2 border-dashed border-purple-300 mb-3">
-                  <span className="text-purple-500 text-sm">✚</span>
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-2.5 border-2 border-dashed border-purple-300 mb-3">
+                  <span className="text-purple-500 text-sm font-bold">+</span>
                   <input
                     type="text"
                     value={newProductName}
@@ -420,7 +465,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
                     placeholder="Nom du produit"
                     className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 min-w-[140px]"
                     autoFocus
-                    onKeyDown={(e) => { if (e.key === 'Enter') addManualProduct(); if (e.key === 'Escape') { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); } }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddAndCreate(); if (e.key === 'Escape') { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); } }}
                   />
                   <input
                     type="url"
@@ -428,63 +473,30 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
                     onChange={(e) => setNewProductUrl(e.target.value)}
                     placeholder="https://www.site.com/produit (optionnel)"
                     className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-200 text-gray-500 placeholder:text-gray-300"
-                    onKeyDown={(e) => { if (e.key === 'Enter') addManualProduct(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddAndCreate(); }}
                   />
-                  <button onClick={addManualProduct} disabled={!newProductName.trim()} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Ajouter</button>
+                  <button onClick={handleAddAndCreate} disabled={!newProductName.trim()} className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">Ajouter</button>
                   <button onClick={() => { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); }} className="px-2 py-1.5 text-gray-400 hover:text-gray-600 text-xs">✕</button>
                 </div>
               ) : (
                 <button
                   onClick={() => setShowAddProduct(true)}
-                  className="text-xs text-purple-600 hover:text-purple-800 font-medium hover:bg-purple-50 rounded-lg px-2 py-1 transition-colors mb-3"
+                  className="text-xs text-purple-600 hover:text-purple-800 font-medium hover:bg-purple-50 rounded-lg px-2 py-1.5 transition-colors mb-3 border border-dashed border-purple-200"
                 >
                   + Ajouter un produit manuellement
                 </button>
               )}
 
-              {/* Bouton créer */}
-              <div className="flex items-center justify-between pt-2 border-t border-amber-200">
-                <span className="text-xs text-amber-600">{checkedCount} groupe(s) sélectionné(s)</span>
-                <button
-                  onClick={createGroupsFromAnalysis}
-                  disabled={checkedCount === 0}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold transition-all hover:shadow-md active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  ✅ Créer {checkedCount} groupe{checkedCount > 1 ? 's' : ''}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Groupes déjà tous créés */}
-          {onCreateGroups && groupsCreated && missingGroups.length === 0 && (
-            <div className="bg-green-50 rounded-xl p-3 border border-green-200">
-              <div className="flex items-center justify-between">
-                <span className="text-green-700 text-sm font-medium flex items-center gap-2">
-                  ✅ Tous les groupes sont créés ! Ajoute les photos dans l'onglet <strong>Assets</strong>.
-                </span>
-                <button
-                  onClick={() => setShowAddProduct(true)}
-                  className="text-xs text-green-600 hover:text-green-800 font-medium hover:bg-green-100 rounded-lg px-2 py-1 transition-colors"
-                >
-                  + Ajouter un produit
-                </button>
-              </div>
-              {/* Inline add even after groups created */}
-              {showAddProduct && (
-                <div className="flex items-center gap-2 bg-white rounded-lg p-2 border-2 border-dashed border-green-300 mt-2">
-                  <span className="text-green-500 text-sm">✚</span>
-                  <input type="text" value={newProductName} onChange={(e) => setNewProductName(e.target.value)}
-                    placeholder="Nom du produit" autoFocus
-                    className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-purple-400 focus:outline-none min-w-[140px]"
-                    onKeyDown={(e) => { if (e.key === 'Enter') { addManualProduct(); if (onCreateGroups && newProductName.trim()) { onCreateGroups([newProductName.trim()], newProductUrl.trim() ? { [newProductName.trim()]: newProductUrl.trim() } : undefined); } } if (e.key === 'Escape') { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); } }} />
-                  <input type="url" value={newProductUrl} onChange={(e) => setNewProductUrl(e.target.value)}
-                    placeholder="https://... (optionnel)"
-                    className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-purple-400 focus:outline-none text-gray-500 placeholder:text-gray-300"
-                    onKeyDown={(e) => { if (e.key === 'Enter') { const n = newProductName.trim(); if (n && onCreateGroups) { if (analysis && !analysis.products.includes(n)) updateAnalysis('products', [...analysis.products, n]); if (newProductUrl.trim()) setProductUrlDrafts(prev => ({ ...prev, [n]: newProductUrl.trim() })); onCreateGroups([n], newProductUrl.trim() ? { [n]: newProductUrl.trim() } : undefined); setNewProductName(''); setNewProductUrl(''); setShowAddProduct(false); } } }} />
-                  <button onClick={() => { const n = newProductName.trim(); if (n && onCreateGroups) { if (analysis && !analysis.products.includes(n)) updateAnalysis('products', [...analysis.products, n]); if (newProductUrl.trim()) setProductUrlDrafts(prev => ({ ...prev, [n]: newProductUrl.trim() })); onCreateGroups([n], newProductUrl.trim() ? { [n]: newProductUrl.trim() } : undefined); setNewProductName(''); setNewProductUrl(''); setShowAddProduct(false); } }}
-                    disabled={!newProductName.trim()} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40">Créer</button>
-                  <button onClick={() => { setShowAddProduct(false); setNewProductName(''); setNewProductUrl(''); }} className="text-gray-400 hover:text-gray-600 text-xs px-1">✕</button>
+              {/* Bouton créer les groupes cochés */}
+              {checkedCount > 0 && (
+                <div className="flex items-center justify-between pt-3 border-t border-gray-200">
+                  <span className="text-xs text-gray-500">{checkedCount} groupe(s) à créer</span>
+                  <button
+                    onClick={createGroupsFromAnalysis}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-semibold transition-all hover:shadow-md active:scale-95"
+                  >
+                    ✅ Créer {checkedCount} groupe{checkedCount > 1 ? 's' : ''}
+                  </button>
                 </div>
               )}
             </div>
