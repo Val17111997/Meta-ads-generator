@@ -221,30 +221,9 @@ export default function Home() {
               {stats.total > 0 && <div className="w-32 h-2 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all duration-700" style={{ width: `${progress}%` }}></div></div>}
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1">
-                <button onClick={() => setIncludeText(!includeText)} className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${includeText ? 'bg-white/10 text-white' : 'text-white/40'}`} title="Texte">✍️</button>
-                <button onClick={() => setIncludeLogo(!includeLogo)} className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${includeLogo ? 'bg-white/10 text-white' : 'text-white/40'}`} title="Logo">🏷️</button>
-                <div className="w-px h-4 bg-white/10"></div>
-                <button onClick={() => setVideoEngine('veo')} className={`px-2 py-1.5 rounded-md text-[11px] font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-500/20 text-blue-400' : 'text-white/40'}`}>Veo</button>
-                <button onClick={() => setVideoEngine('kling')} className={`px-2 py-1.5 rounded-md text-[11px] font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-500/20 text-purple-400' : 'text-white/40'}`}>Kling</button>
-              </div>
-              <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="px-4 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-lg text-sm font-semibold hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:shadow-lg hover:shadow-violet-500/20 active:scale-95">
-                {isGenerating ? <span className="flex items-center gap-2"><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span></span> : '⚡ Générer'}
-              </button>
-              <button onClick={toggleAutoMode} disabled={stats.remaining === 0} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all active:scale-95 ${autoMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'} disabled:opacity-30 disabled:cursor-not-allowed`}>
-                {autoMode ? '■ Stop' : '▶ Auto'}
-              </button>
               <button onClick={() => setShowLogs(!showLogs)} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showLogs ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/50'}`}>📋</button>
             </div>
           </div>
-
-          {(error || (autoMode && !error) || videoPolling) && (
-            <div className="pb-2 space-y-1">
-              {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-500/10 text-emerald-400' : error.includes('⏳') ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{error}</div>}
-              {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>Mode auto actif</div>}
-              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Vidéo {videoPolling.operation.startsWith('kling:') ? 'Kling' : 'Veo'} en cours…</div>}
-            </div>
-          )}
 
           <div className="flex gap-1">
             {TABS.map(tab => (
@@ -256,6 +235,82 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* ═══ GENERATION BAR - toujours visible ═══ */}
+      <div className="sticky top-[105px] z-40 bg-[#111118]/95 backdrop-blur-xl border-b border-white/[0.06]">
+        <div className="max-w-[1600px] mx-auto px-6 py-3">
+          <div className="flex items-center gap-4">
+
+            {/* Options claires */}
+            <div className="flex items-center gap-3">
+              <button onClick={() => setIncludeText(!includeText)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${includeText ? 'bg-violet-500/15 border-violet-500/30 text-violet-300' : 'bg-white/[0.02] border-white/[0.06] text-white/30 hover:text-white/50'}`}>
+                <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeText ? 'bg-violet-500 text-white' : 'border border-white/20'}`}>{includeText ? '✓' : ''}</span>
+                Avec texte
+              </button>
+              <button onClick={() => setIncludeLogo(!includeLogo)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${includeLogo ? 'bg-violet-500/15 border-violet-500/30 text-violet-300' : 'bg-white/[0.02] border-white/[0.06] text-white/30 hover:text-white/50'}`}>
+                <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeLogo ? 'bg-violet-500 text-white' : 'border border-white/20'}`}>{includeLogo ? '✓' : ''}</span>
+                Avec logo
+              </button>
+              <div className="h-6 w-px bg-white/[0.06]"></div>
+              <div className="flex items-center gap-1 bg-white/[0.03] rounded-lg p-0.5 border border-white/[0.06]">
+                <button onClick={() => setVideoEngine('veo')} className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-500/20 text-blue-400 shadow-sm' : 'text-white/30 hover:text-white/50'}`}>Veo 3.1</button>
+                <button onClick={() => setVideoEngine('kling')} className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-500/20 text-purple-400 shadow-sm' : 'text-white/30 hover:text-white/50'}`}>Kling 2.6</button>
+              </div>
+            </div>
+
+            {/* Spacer */}
+            <div className="flex-1"></div>
+
+            {/* Dernier résultat inline */}
+            {currentImage && (
+              <div className="flex items-center gap-3 bg-white/[0.03] rounded-lg px-3 py-1.5 border border-white/[0.06]">
+                <div className="w-10 h-10 rounded-md overflow-hidden border border-white/10 flex-shrink-0">
+                  {currentImage.startsWith('data:video')
+                    ? <video src={currentImage} className="w-full h-full object-cover" />
+                    : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <div className="max-w-[200px]">
+                  <p className="text-[10px] text-emerald-400 font-semibold">Dernier résultat</p>
+                  <p className="text-[10px] text-white/30 line-clamp-1">{currentPrompt}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Boutons de génération — PROÉMINENTS */}
+            <button
+              onClick={generateSingle}
+              disabled={isGenerating || stats.remaining === 0}
+              className="px-8 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-xl text-base font-bold hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:shadow-xl hover:shadow-violet-500/25 active:scale-95 flex items-center gap-2.5"
+            >
+              {isGenerating ? (
+                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>Génération…</>
+              ) : (
+                <><span className="text-lg">⚡</span>Générer</>
+              )}
+            </button>
+            <button
+              onClick={toggleAutoMode}
+              disabled={stats.remaining === 0}
+              className={`px-6 py-3 rounded-xl text-base font-bold transition-all active:scale-95 flex items-center gap-2 ${
+                autoMode
+                  ? 'bg-red-500/20 text-red-400 border-2 border-red-500/30 hover:bg-red-500/30 animate-pulse'
+                  : 'bg-emerald-500/15 text-emerald-400 border-2 border-emerald-500/30 hover:bg-emerald-500/25'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              {autoMode ? <><span>■</span>Stop</> : <><span>▶</span>Auto</>}
+            </button>
+          </div>
+
+          {/* Status inline */}
+          {(error || (autoMode && !error) || videoPolling) && (
+            <div className="mt-2 space-y-1">
+              {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-500/10 text-emerald-400' : error.includes('⏳') ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{error}</div>}
+              {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>Mode auto actif — génération continue</div>}
+              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Vidéo {videoPolling.operation.startsWith('kling:') ? 'Kling' : 'Veo'} en cours de création…</div>}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ═══ MAIN ═══ */}
       <main className="flex-1 bg-[#13131a]">
@@ -358,16 +413,22 @@ export default function Home() {
                 )}
               </div>
               <div className="grid grid-cols-4 gap-6">
-                {/* Dernier média */}
+                {/* Dernier média - prominent */}
                 <div className="col-span-1 bg-[#1a1a24] rounded-xl border border-white/[0.06] p-4">
-                  <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Dernier média</h3>
+                  <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Dernier résultat</h3>
                   {currentImage ? (
                     <div>
-                      <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border border-white/[0.06]">
+                      <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border-2 border-violet-500/20 shadow-lg shadow-violet-500/10">
                         {currentImage.startsWith('data:video') ? <video src={currentImage} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                          <span className="text-[10px] font-semibold text-emerald-400">✓ Généré</span>
+                        </div>
                       </div>
-                      {currentPrompt && <p className="text-[11px] text-white/40 line-clamp-3 mb-3">{currentPrompt}</p>}
-                      <a href={currentImage} download={`meta-ad-${Date.now()}.png`} className="block w-full py-2 bg-white/5 hover:bg-white/10 text-center rounded-lg text-xs font-medium text-white/60 transition-colors">📥 Télécharger</a>
+                      {currentPrompt && <p className="text-[11px] text-white/40 line-clamp-3 mb-3 leading-relaxed">{currentPrompt}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={() => currentImage && addToFavorites({ url: currentImage, prompt: currentPrompt, timestamp: Date.now(), mediaType: currentImage.startsWith('data:video') ? 'video' : 'image' })} className="flex-1 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs rounded-lg font-semibold transition-colors">⭐ Favori</button>
+                        <a href={currentImage} download={`meta-ad-${Date.now()}.png`} className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-center rounded-lg text-xs font-medium text-white/60 transition-colors">📥</a>
+                      </div>
                     </div>
                   ) : (
                     <div className="aspect-square rounded-lg bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
