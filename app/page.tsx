@@ -197,53 +197,37 @@ export default function Home() {
 
   const totalAssets = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
   const progress = stats.total > 0 ? Math.round((stats.generated/stats.total)*100) : 0;
-  const darkTheme = "[&_.bg-white]:bg-[#1a1a24] [&_.bg-white]:border [&_.bg-white]:border-white/[0.06] [&_.text-gray-600]:text-white/50 [&_.text-gray-700]:text-white/60 [&_.text-gray-800]:text-white/80 [&_.text-gray-500]:text-white/40 [&_.text-gray-400]:text-white/30 [&_.bg-gray-50]:bg-white/[0.03] [&_.bg-gray-100]:bg-white/[0.05] [&_.bg-gray-200]:bg-white/[0.08] [&_.bg-gray-300]:bg-white/10 [&_.border-gray-200]:border-white/[0.06] [&_.border-gray-300]:border-white/10 [&_.shadow-lg]:shadow-none [&_input]:bg-white/5 [&_input]:border-white/10 [&_input]:text-white [&_select]:bg-white/5 [&_select]:text-white [&_.rounded-2xl]:rounded-xl [&_table]:text-white/70 [&_th]:text-white/50 [&_td]:border-white/[0.04] [&_.text-purple-800]:text-violet-300 [&_.text-purple-700]:text-violet-300/80 [&_.text-purple-600]:text-violet-400 [&_.text-purple-500]:text-violet-400 [&_.text-purple-400]:text-violet-300/60 [&_.from-purple-50]:from-violet-500/10 [&_.to-indigo-50]:to-blue-500/10 [&_.border-purple-100]:border-violet-500/20 [&_.border-purple-300]:border-violet-500/30 [&_.bg-green-50]:bg-emerald-500/10 [&_.text-green-700]:text-emerald-400 [&_.border-green-200]:border-emerald-500/20 [&_.bg-red-50]:bg-red-500/10 [&_.text-red-700]:text-red-400 [&_.border-red-200]:border-red-500/20 [&_.bg-blue-50]:bg-blue-500/10 [&_.text-blue-700]:text-blue-400 [&_.border-blue-200]:border-blue-500/20 [&_.bg-purple-100]:bg-violet-500/15 [&_.bg-blue-100]:bg-blue-500/15 [&_.bg-red-100]:bg-red-500/15 [&_.bg-green-100]:bg-emerald-500/15 [&_.text-blue-500]:text-blue-400 [&_.text-red-500]:text-red-400 [&_.text-red-400]:text-red-400 [&_.hover\\:bg-purple-50:hover]:!bg-violet-500/10 [&_.hover\\:text-purple-700:hover]:!text-violet-300 [&_.hover\\:bg-purple-100:hover]:!bg-violet-500/15 [&_.hover\\:bg-gray-200:hover]:!bg-white/10 [&_.hover\\:bg-gray-300:hover]:!bg-white/15 [&_.hover\\:text-red-600:hover]:!text-red-400 [&_.group-hover\\:text-purple-700]:text-violet-300 [&_.group-hover\\:bg-purple-50]:bg-violet-500/10 [&_p]:text-white/50 [&_li]:text-white/50 [&_.font-semibold]:text-white/70";
 
   // ════════════ RENDER ════════════
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 text-gray-800 flex flex-col" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      <style>{`
-        /* Dark theme overrides for hover states in child components */
-        tr:hover td, tr:hover td * { color: rgba(255,255,255,0.9) !important; }
-        tr:hover { background: rgba(255,255,255,0.05) !important; }
-        tr:hover .bg-gray-50, tr:hover .bg-purple-50 { background: rgba(139,92,246,0.1) !important; }
-        .hover\\:bg-gray-50:hover, .hover\\:bg-purple-50:hover { background: rgba(255,255,255,0.05) !important; }
-        .hover\\:bg-gray-100:hover { background: rgba(255,255,255,0.08) !important; }
-        td { color: rgba(255,255,255,0.6) !important; border-color: rgba(255,255,255,0.04) !important; }
-        /* Prompt text always visible */
-        td p, td span, td div { color: inherit !important; }
-        /* Keep colored badges readable */
-        .bg-green-100 span, .bg-blue-100 span, .bg-red-100 span, .bg-purple-100 span { color: inherit !important; }
-        /* Select dropdowns */
-        select option { background: #1a1a24; color: white; }
-      `}</style>
 
       {/* ═══ HEADER ═══ */}
-      <header className="sticky top-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-xl border-b border-white/[0.06]">
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-gray-200 shadow-sm">
         <div className="max-w-[1600px] mx-auto px-6">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
                 <defs><linearGradient id="palGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#8b5cf6"/><stop offset="50%" stopColor="#6366f1"/><stop offset="100%" stopColor="#a855f7"/></linearGradient></defs>
                 <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zM5.5 12c-.83 0-1.5-.67-1.5-1.5S4.67 9 5.5 9 7 9.67 7 10.5 6.33 12 5.5 12zm3-4C7.67 8 7 7.33 7 6.5S7.67 5 8.5 5s1.5.67 1.5 1.5S9.33 8 8.5 8zm7 0c-.83 0-1.5-.67-1.5-1.5S14.67 5 15.5 5s1.5.67 1.5 1.5S16.33 8 15.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S17.67 9 18.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" fill="url(#palGrad)"/>
               </svg>
-              <span className="text-xl font-bold bg-gradient-to-r from-violet-400 via-blue-400 to-pink-400 bg-clip-text text-transparent">Meta Ads Generator</span>
+              <span className="text-xl font-bold bg-gradient-to-r from-violet-600 via-blue-600 to-pink-600 bg-clip-text text-transparent">Meta Ads Generator</span>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>{stats.generated} générés</div>
-              <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-400 px-3 py-1.5 rounded-lg text-xs font-semibold"><span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>{stats.remaining} restants</div>
-              {stats.total > 0 && <div className="w-32 h-2 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all duration-700" style={{ width: `${progress}%` }}></div></div>}
+              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{stats.generated} générés</div>
+              <div className="flex items-center gap-1.5 bg-amber-50 text-amber-600 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-200"><span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>{stats.remaining} restants</div>
+              {stats.total > 0 && <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all duration-700" style={{ width: `${progress}%` }}></div></div>}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setShowLogs(!showLogs)} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showLogs ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/50'}`}>📋</button>
+              <button onClick={() => setShowLogs(!showLogs)} className={`w-9 h-9 rounded-lg flex items-center justify-center transition-all ${showLogs ? 'bg-gray-200 text-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}>📋</button>
             </div>
           </div>
 
           <div className="flex gap-1">
             {TABS.map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-5 py-3 text-sm font-medium rounded-t-lg transition-all ${activeTab === tab.id ? 'bg-[#13131a] text-white' : 'text-white/40 hover:text-white/60 hover:bg-white/[0.03]'}`}>
-                <span className="mr-2 opacity-60">{tab.icon}</span>{tab.label}
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-5 py-3 text-sm font-medium rounded-t-lg transition-all ${activeTab === tab.id ? 'bg-gray-50 text-gray-800 border-b-2 border-violet-500' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}>
+                <span className="mr-2 opacity-50">{tab.icon}</span>{tab.label}
                 {((tab.id === 'studio' && generatedImages.length > 0) || (tab.id === 'prompts' && stats.total > 0)) && <span className="ml-2 w-1.5 h-1.5 rounded-full bg-violet-500 inline-block"></span>}
               </button>
             ))}
@@ -251,162 +235,133 @@ export default function Home() {
         </div>
       </header>
 
-      {/* ═══ GENERATION BAR - toujours visible ═══ */}
-      <div className="sticky top-[105px] z-40 bg-[#111118]/95 backdrop-blur-xl border-b border-white/[0.06]">
+      {/* ═══ GENERATION BAR ═══ */}
+      <div className="sticky top-[105px] z-40 bg-white/95 backdrop-blur-xl border-b border-gray-200">
         <div className="max-w-[1600px] mx-auto px-6 py-3">
           <div className="flex items-center gap-4">
-
-            {/* Options claires */}
             <div className="flex items-center gap-3">
-              <button onClick={() => setIncludeText(!includeText)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${includeText ? 'bg-violet-500/15 border-violet-500/30 text-violet-300' : 'bg-white/[0.02] border-white/[0.06] text-white/30 hover:text-white/50'}`}>
-                <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeText ? 'bg-violet-500 text-white' : 'border border-white/20'}`}>{includeText ? '✓' : ''}</span>
+              <button onClick={() => setIncludeText(!includeText)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${includeText ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600'}`}>
+                <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeText ? 'bg-violet-500 text-white' : 'border border-gray-300'}`}>{includeText ? '✓' : ''}</span>
                 Avec texte
               </button>
-              <button onClick={() => setIncludeLogo(!includeLogo)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${includeLogo ? 'bg-violet-500/15 border-violet-500/30 text-violet-300' : 'bg-white/[0.02] border-white/[0.06] text-white/30 hover:text-white/50'}`}>
-                <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeLogo ? 'bg-violet-500 text-white' : 'border border-white/20'}`}>{includeLogo ? '✓' : ''}</span>
+              <button onClick={() => setIncludeLogo(!includeLogo)} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${includeLogo ? 'bg-violet-50 border-violet-300 text-violet-700' : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600'}`}>
+                <span className={`w-3 h-3 rounded-sm flex items-center justify-center text-[8px] ${includeLogo ? 'bg-violet-500 text-white' : 'border border-gray-300'}`}>{includeLogo ? '✓' : ''}</span>
                 Avec logo
               </button>
-
             </div>
-
-            {/* Spacer */}
             <div className="flex-1"></div>
-
-            {/* Dernier résultat inline */}
             {currentImage && (
-              <div className="flex items-center gap-3 bg-white/[0.03] rounded-lg px-3 py-1.5 border border-white/[0.06]">
-                <div className="w-10 h-10 rounded-md overflow-hidden border border-white/10 flex-shrink-0">
-                  {currentImage.startsWith('data:video')
-                    ? <video src={currentImage} className="w-full h-full object-cover" />
-                    : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
+              <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200">
+                <div className="w-10 h-10 rounded-md overflow-hidden border border-gray-200 flex-shrink-0">
+                  {currentImage.startsWith('data:video') ? <video src={currentImage} className="w-full h-full object-cover" /> : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
                 </div>
                 <div className="max-w-[200px]">
-                  <p className="text-[10px] text-emerald-400 font-semibold">Dernier résultat</p>
-                  <p className="text-[10px] text-white/30 line-clamp-1">{currentPrompt}</p>
+                  <p className="text-[10px] text-emerald-600 font-semibold">Dernier résultat</p>
+                  <p className="text-[10px] text-gray-400 line-clamp-1">{currentPrompt}</p>
                 </div>
               </div>
             )}
-
-            {/* Boutons de génération — PROÉMINENTS */}
-            <button
-              onClick={generateSingle}
-              disabled={isGenerating || stats.remaining === 0}
-              className="px-8 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-xl text-base font-bold hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:shadow-xl hover:shadow-violet-500/25 active:scale-95 flex items-center gap-2.5"
-            >
-              {isGenerating ? (
-                <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>Génération…</>
-              ) : (
-                <><span className="text-lg">⚡</span>Générer</>
-              )}
+            <button onClick={generateSingle} disabled={isGenerating || stats.remaining === 0} className="px-8 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-xl text-base font-bold hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:shadow-xl hover:shadow-violet-500/25 active:scale-95 flex items-center gap-2.5">
+              {isGenerating ? (<><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>Génération…</>) : (<><span className="text-lg">⚡</span>Générer</>)}
             </button>
-            <button
-              onClick={toggleAutoMode}
-              disabled={stats.remaining === 0}
-              className={`px-6 py-3 rounded-xl text-base font-bold transition-all active:scale-95 flex items-center gap-2 ${
-                autoMode
-                  ? 'bg-red-500/20 text-red-400 border-2 border-red-500/30 hover:bg-red-500/30 animate-pulse'
-                  : 'bg-emerald-500/15 text-emerald-400 border-2 border-emerald-500/30 hover:bg-emerald-500/25'
-              } disabled:opacity-30 disabled:cursor-not-allowed`}
-            >
+            <button onClick={toggleAutoMode} disabled={stats.remaining === 0} className={`px-6 py-3 rounded-xl text-base font-bold transition-all active:scale-95 flex items-center gap-2 ${autoMode ? 'bg-red-50 text-red-600 border-2 border-red-300 hover:bg-red-100 animate-pulse' : 'bg-emerald-50 text-emerald-600 border-2 border-emerald-300 hover:bg-emerald-100'} disabled:opacity-30 disabled:cursor-not-allowed`}>
               {autoMode ? <><span>■</span>Stop</> : <><span>▶</span>Auto</>}
             </button>
           </div>
-
-          {/* Status inline */}
           {(error || (autoMode && !error) || videoPolling) && (
             <div className="mt-2 space-y-1">
-              {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-500/10 text-emerald-400' : error.includes('⏳') ? 'bg-amber-500/10 text-amber-400' : 'bg-red-500/10 text-red-400'}`}>{error}</div>}
-              {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>Mode auto actif — génération continue</div>}
-              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>Vidéo Veo en cours de création…</div>}
+              {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : error.includes('⏳') ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{error}</div>}
+              {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Mode auto actif — génération continue</div>}
+              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>Vidéo Veo en cours de création…</div>}
             </div>
           )}
         </div>
       </div>
 
       {/* ═══ MAIN ═══ */}
-      <main className="flex-1 bg-[#13131a]">
+      <main className="flex-1">
         <div className="max-w-[1600px] mx-auto p-6">
 
           {activeTab === 'strategy' && (
             <div className="space-y-6">
-              <div><h2 className="text-2xl font-bold tracking-tight">Stratégie de contenu</h2><p className="text-white/40 text-sm mt-1">Analyse un site et génère des prompts optimisés</p></div>
-              <div className={darkTheme}><SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} /></div>
+              <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Stratégie de contenu</h2><p className="text-gray-400 text-sm mt-1">Analyse un site et génère des prompts optimisés</p></div>
+              <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} />
             </div>
           )}
 
           {activeTab === 'prompts' && (
             <div className="space-y-6">
-              <div><h2 className="text-2xl font-bold tracking-tight">Bibliothèque de prompts</h2><p className="text-white/40 text-sm mt-1">{stats.total} prompts • {stats.generated} générés • {stats.remaining} en attente</p></div>
-              <div className={darkTheme}><PromptsTable ref={promptsTableRef} productGroups={Object.keys(productGroups)} /></div>
+              <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Bibliothèque de prompts</h2><p className="text-gray-400 text-sm mt-1">{stats.total} prompts • {stats.generated} générés • {stats.remaining} en attente</p></div>
+              <PromptsTable ref={promptsTableRef} productGroups={Object.keys(productGroups)} />
             </div>
           )}
 
           {activeTab === 'assets' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <div><h2 className="text-2xl font-bold tracking-tight">Assets créatifs</h2><p className="text-white/40 text-sm mt-1">{Object.keys(productGroups).length} groupes • {totalAssets} images • {brandAssets.length} assets de marque</p></div>
-                <button onClick={clearAllData} className="text-xs text-white/30 hover:text-red-400 transition-colors">Tout réinitialiser</button>
+                <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Assets créatifs</h2><p className="text-gray-400 text-sm mt-1">{Object.keys(productGroups).length} groupes • {totalAssets} images • {brandAssets.length} assets de marque</p></div>
+                <button onClick={clearAllData} className="text-xs text-gray-300 hover:text-red-500 transition-colors">Tout réinitialiser</button>
               </div>
               <div className="grid grid-cols-2 gap-6">
-                {/* Produits */}
-                <div className="bg-[#1a1a24] rounded-xl border border-white/[0.06] p-5">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-white/80">📸 Produits</h3>
+                    <h3 className="font-semibold text-gray-700">📸 Produits</h3>
                     <div className="flex gap-2">
-                      <button onClick={() => setShowNewGroupModal(true)} className="px-3 py-1.5 bg-violet-500/20 text-violet-400 text-xs rounded-lg font-semibold hover:bg-violet-500/30">+ Groupe</button>
-                      {Object.keys(productGroups).length > 0 && <button onClick={clearAllProductGroups} className="px-3 py-1.5 bg-red-500/10 text-red-400 text-xs rounded-lg font-semibold hover:bg-red-500/20">Vider</button>}
+                      <button onClick={() => setShowNewGroupModal(true)} className="px-3 py-1.5 bg-violet-50 text-violet-600 text-xs rounded-lg font-semibold hover:bg-violet-100 border border-violet-200">+ Groupe</button>
+                      {Object.keys(productGroups).length > 0 && <button onClick={clearAllProductGroups} className="px-3 py-1.5 bg-red-50 text-red-500 text-xs rounded-lg font-semibold hover:bg-red-100 border border-red-200">Vider</button>}
                     </div>
                   </div>
                   {Object.keys(productGroups).length === 0 ? (
-                    <div className="text-center py-12 rounded-xl border border-dashed border-white/10"><div className="text-4xl mb-3 opacity-40">📂</div><p className="text-white/30 text-sm">Crée un groupe pour commencer</p></div>
+                    <div className="text-center py-12 rounded-xl border-2 border-dashed border-gray-200"><div className="text-4xl mb-3 opacity-30">📂</div><p className="text-gray-400 text-sm">Crée un groupe pour commencer</p></div>
                   ) : (
                     <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                       {Object.entries(productGroups).map(([gn, images]) => (
-                        <div key={gn} className={`rounded-lg p-3 border transition-all ${dragOverGroup === gn ? 'border-violet-500/50 bg-violet-500/5' : 'border-white/[0.06] bg-white/[0.02]'}`}
+                        <div key={gn} className={`rounded-lg p-3 border transition-all ${dragOverGroup === gn ? 'border-violet-400 bg-violet-50' : 'border-gray-200 bg-gray-50'}`}
                           onDrop={e => handleGroupDrop(gn,e)} onDragOver={e => handleGroupDragOver(gn,e)} onDragLeave={handleGroupDragLeave}>
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-medium text-white/70">{gn} <span className="text-white/30">({images.length})</span></span>
+                            <span className="font-medium text-sm text-gray-700">{gn} <span className="text-gray-400">({images.length})</span></span>
                             <div className="flex gap-1">
-                              <label className="cursor-pointer"><input type="file" multiple accept="image/*" onChange={e => handleGroupImageUpload(gn,e)} disabled={uploading} className="hidden" /><span className="px-2 py-1 bg-white/5 hover:bg-white/10 text-white/50 text-xs rounded font-medium cursor-pointer">+</span></label>
-                              <button onClick={() => deleteGroup(gn)} className="px-2 py-1 text-white/20 hover:text-red-400 text-xs">✕</button>
+                              <label className="px-2 py-1 bg-violet-100 text-violet-600 rounded text-xs cursor-pointer hover:bg-violet-200 font-medium">+ Photo<input type="file" className="hidden" accept="image/*" multiple onChange={e => handleGroupImageUpload(gn,e)} /></label>
+                              <button onClick={() => deleteGroup(gn)} className="px-2 py-1 text-red-400 hover:text-red-600 text-xs">🗑️</button>
                             </div>
                           </div>
-                          {images.length > 0 ? (
-                            <div className="grid grid-cols-5 gap-1.5">{images.map((img,i) => (
-                              <div key={i} className="relative group aspect-square">
-                                <img src={img.url} alt="" className="w-full h-full object-cover rounded" />
-                                <button onClick={() => deleteGroupImage(gn,img.name)} className="absolute inset-0 bg-black/0 group-hover:bg-black/60 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"><span className="text-red-400 text-xs">✕</span></button>
-                              </div>
-                            ))}</div>
-                          ) : <div className="text-center py-4 text-white/20 text-xs">Glisse des images ici</div>}
+                          {images.length > 0 && (
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {images.map((img,j) => (
+                                <div key={j} className="relative group aspect-square rounded-md overflow-hidden border border-gray-200">
+                                  <img src={img.url} alt={img.name} className="w-full h-full object-cover" />
+                                  <button onClick={() => deleteGroupImage(gn, img.name)} className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {images.length === 0 && <p className="text-xs text-gray-400 text-center py-4">Glisse ou ajoute des photos</p>}
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
-                {/* Charte */}
-                <div className="bg-[#1a1a24] rounded-xl border border-white/[0.06] p-5">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-white/80">🎨 Charte graphique</h3>
-                    {brandAssets.length > 0 && <button onClick={clearBrandAssets} className="px-3 py-1.5 bg-red-500/10 text-red-400 text-xs rounded-lg font-semibold hover:bg-red-500/20">Vider</button>}
+                    <h3 className="font-semibold text-gray-700">🎨 Charte graphique</h3>
+                    {brandAssets.length > 0 && <button onClick={clearBrandAssets} className="px-3 py-1.5 bg-red-50 text-red-500 text-xs rounded-lg font-semibold hover:bg-red-100 border border-red-200">Vider</button>}
                   </div>
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    {([['logo','🏷️','Logo'],['palette','🎨','Palette'],['style','✨','Style']] as const).map(([type,icon,label]) => (
-                      <label key={type} className="cursor-pointer">
-                        <div className="border border-dashed border-white/10 hover:border-violet-500/30 rounded-lg p-4 text-center transition-all hover:bg-violet-500/5">
-                          <input type="file" accept="image/*" multiple={type==='style'} onChange={e => handleBrandAssetUpload(e,type)} disabled={uploadingBrand} className="hidden" />
-                          <div className="text-2xl mb-1">{icon}</div><p className="text-xs font-medium text-white/40">{label}</p>
+                  <div className="space-y-3">
+                    {[{t:'logo' as const,l:'🏷️ Logo',d:'Logo PNG transparent'},{t:'palette' as const,l:'🎨 Palette',d:'Palette couleurs'},{t:'style' as const,l:'✨ Moodboard',d:'Exemples visuels'}].map(({t,l,d}) => (
+                      <div key={t} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div><span className="font-medium text-sm text-gray-700">{l}</span><p className="text-xs text-gray-400">{d}</p></div>
+                        <div className="flex items-center gap-2">
+                          {brandAssets.filter(a => a.type===t).map((a,i) => (
+                            <div key={i} className="relative group w-10 h-10 rounded-md overflow-hidden border border-gray-200">
+                              <img src={a.url} alt={a.name} className="w-full h-full object-cover" />
+                              <button onClick={() => deleteBrandAsset(a.name)} className="absolute inset-0 bg-red-500/70 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                            </div>
+                          ))}
+                          <label className="px-3 py-1.5 bg-violet-50 text-violet-600 text-xs rounded-lg cursor-pointer hover:bg-violet-100 font-medium border border-violet-200">+<input type="file" className="hidden" accept="image/*" multiple onChange={e => handleBrandAssetUpload(e,t)} /></label>
                         </div>
-                      </label>
+                      </div>
                     ))}
                   </div>
-                  {brandAssets.length > 0 && (
-                    <div className="grid grid-cols-4 gap-3">{brandAssets.map((a,i) => (
-                      <div key={i} className="relative group"><img src={a.url} alt="" className="w-full h-20 object-contain bg-white/[0.03] rounded-lg p-2" />
-                        <button onClick={() => deleteBrandAsset(a.name)} className="absolute inset-0 bg-black/0 group-hover:bg-black/60 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"><span className="text-red-400 text-xs">✕</span></button>
-                      </div>
-                    ))}</div>
-                  )}
                 </div>
               </div>
             </div>
@@ -415,71 +370,66 @@ export default function Home() {
           {activeTab === 'studio' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <div><h2 className="text-2xl font-bold tracking-tight">Studio créatif</h2><p className="text-white/40 text-sm mt-1">{generatedImages.length} médias • {favorites.length} favoris</p></div>
+                <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Studio créatif</h2><p className="text-gray-400 text-sm mt-1">{generatedImages.length} médias • {favorites.length} favoris</p></div>
                 {generatedImages.length > 0 && (
                   <div className="flex gap-2">
-                    <button onClick={downloadAll} className="px-4 py-2 bg-violet-500/20 text-violet-400 text-sm rounded-lg font-semibold hover:bg-violet-500/30">📦 ZIP</button>
-                    <button onClick={clearGallery} className="px-4 py-2 bg-red-500/10 text-red-400 text-sm rounded-lg font-semibold hover:bg-red-500/20">🗑️ Vider</button>
+                    <button onClick={downloadAll} className="px-4 py-2 bg-violet-50 text-violet-600 text-sm rounded-lg font-semibold hover:bg-violet-100 border border-violet-200">📦 ZIP</button>
+                    <button onClick={clearGallery} className="px-4 py-2 bg-red-50 text-red-500 text-sm rounded-lg font-semibold hover:bg-red-100 border border-red-200">🗑️ Vider</button>
                   </div>
                 )}
               </div>
               <div className="grid grid-cols-4 gap-6">
-                {/* Dernier média - prominent */}
-                <div className="col-span-1 bg-[#1a1a24] rounded-xl border border-white/[0.06] p-4">
-                  <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">Dernier résultat</h3>
+                <div className="col-span-1 bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dernier résultat</h3>
                   {currentImage ? (
                     <div>
-                      <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border-2 border-violet-500/20 shadow-lg shadow-violet-500/10">
+                      <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border-2 border-violet-200 shadow-lg shadow-violet-100">
                         {currentImage.startsWith('data:video') ? <video src={currentImage} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-2">
                           <span className="text-[10px] font-semibold text-emerald-400">✓ Généré</span>
                         </div>
                       </div>
-                      {currentPrompt && <p className="text-[11px] text-white/40 line-clamp-3 mb-3 leading-relaxed">{currentPrompt}</p>}
+                      {currentPrompt && <p className="text-[11px] text-gray-400 line-clamp-3 mb-3 leading-relaxed">{currentPrompt}</p>}
                       <div className="flex gap-2">
-                        <button onClick={() => currentImage && addToFavorites({ url: currentImage, prompt: currentPrompt, timestamp: Date.now(), mediaType: currentImage.startsWith('data:video') ? 'video' : 'image' })} className="flex-1 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs rounded-lg font-semibold transition-colors">⭐ Favori</button>
-                        <a href={currentImage} download={`meta-ad-${Date.now()}.png`} className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-center rounded-lg text-xs font-medium text-white/60 transition-colors">📥</a>
+                        <button onClick={() => currentImage && addToFavorites({ url: currentImage, prompt: currentPrompt, timestamp: Date.now(), mediaType: currentImage.startsWith('data:video') ? 'video' : 'image' })} className="flex-1 py-2 bg-amber-50 hover:bg-amber-100 text-amber-600 text-xs rounded-lg font-semibold transition-colors border border-amber-200">⭐ Favori</button>
+                        <a href={currentImage} download={`meta-ad-${Date.now()}.png`} className="flex-1 py-2 bg-gray-50 hover:bg-gray-100 text-center rounded-lg text-xs font-medium text-gray-500 transition-colors border border-gray-200">📥</a>
                       </div>
                     </div>
                   ) : (
-                    <div className="aspect-square rounded-lg bg-white/[0.02] border border-dashed border-white/10 flex items-center justify-center">
-                      <div className="text-center"><div className="text-4xl mb-2 opacity-20">⬡</div><p className="text-white/20 text-xs">En attente</p></div>
+                    <div className="aspect-square rounded-lg bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center">
+                      <div className="text-center"><div className="text-4xl mb-2 opacity-20">⬡</div><p className="text-gray-300 text-xs">En attente</p></div>
                     </div>
                   )}
                 </div>
-                {/* Galerie */}
                 <div className="col-span-3">
                   {generatedImages.length > 0 ? (
                     <div className="grid grid-cols-4 gap-3">
                       {generatedImages.map((img, i) => (
-                        <div key={i} className="group bg-[#1a1a24] rounded-lg border border-white/[0.06] overflow-hidden hover:border-white/10 transition-all">
+                        <div key={i} className="group bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:border-violet-300 hover:shadow-md transition-all">
                           <div className="relative aspect-square">
                             {img.mediaType === 'video'
                               ? <video src={img.url} loop muted className="w-full h-full object-cover" onMouseEnter={e => (e.target as HTMLVideoElement).play()} onMouseLeave={e => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }} />
                               : <img src={img.url} alt="" className="w-full h-full object-cover" />}
-                            {img.mediaType === 'video' && <div className="absolute top-2 right-2 bg-red-500/80 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
+                            {img.mediaType === 'video' && <div className="absolute top-2 right-2 bg-red-500 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
                           </div>
                           <div className="p-2">
-                            <p className="text-[10px] text-white/30 line-clamp-1 mb-2">{img.prompt}</p>
+                            <p className="text-[10px] text-gray-400 line-clamp-1 mb-2">{img.prompt}</p>
                             <div className="flex gap-1">
-                              <button onClick={() => addToFavorites(img)} className="flex-1 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-[11px] rounded font-medium transition-colors">⭐</button>
-                              <button onClick={() => downloadSingle(img.url, img.timestamp)} className="flex-1 py-1.5 bg-white/5 hover:bg-white/10 text-white/40 text-[11px] rounded font-medium transition-colors">📥</button>
+                              <button onClick={() => addToFavorites(img)} className="flex-1 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-[11px] rounded font-medium transition-colors">⭐</button>
+                              <button onClick={() => downloadSingle(img.url, img.timestamp)} className="flex-1 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-400 text-[11px] rounded font-medium transition-colors">📥</button>
                             </div>
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <div className="flex items-center justify-center h-64 rounded-xl border border-dashed border-white/10">
-                      <div className="text-center"><div className="text-5xl mb-3 opacity-15">⬡</div><p className="text-white/20 text-sm">Les médias apparaîtront ici</p><p className="text-white/10 text-xs mt-1">Utilise ⚡ Générer ou ▶ Auto</p></div>
+                    <div className="flex items-center justify-center h-64 rounded-xl border-2 border-dashed border-gray-200">
+                      <div className="text-center"><div className="text-5xl mb-3 opacity-15">⬡</div><p className="text-gray-300 text-sm">Les médias apparaîtront ici</p><p className="text-gray-200 text-xs mt-1">Utilise ⚡ Générer ou ▶ Auto</p></div>
                     </div>
                   )}
                 </div>
               </div>
-              {/* Favoris */}
-              <div className={darkTheme}>
-                <FavoritesPanel favorites={favorites} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} />
-              </div>
+              <FavoritesPanel favorites={favorites} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} />
             </div>
           )}
         </div>
@@ -487,14 +437,14 @@ export default function Home() {
 
       {/* ═══ LOG DRAWER ═══ */}
       {showLogs && (
-        <div className="fixed right-0 top-0 bottom-0 w-96 bg-[#0a0a0f] border-l border-white/[0.06] z-[60] flex flex-col shadow-2xl shadow-black/50">
-          <div className="flex items-center justify-between p-4 border-b border-white/[0.06]">
-            <h3 className="font-semibold text-sm">📋 Journal</h3>
-            <button onClick={() => setShowLogs(false)} className="text-white/30 hover:text-white/60 text-lg">✕</button>
+        <div className="fixed right-0 top-0 bottom-0 w-96 bg-white border-l border-gray-200 z-[60] flex flex-col shadow-2xl">
+          <div className="flex items-center justify-between p-4 border-b border-gray-200">
+            <h3 className="font-semibold text-sm text-gray-700">📋 Journal</h3>
+            <button onClick={() => setShowLogs(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-1">
-            {logs.length === 0 ? <p className="text-white/20 text-xs text-center py-8">Aucune activité</p> : logs.map((log, i) => (
-              <div key={i} className="text-[11px] text-white/40 py-2 px-3 rounded bg-white/[0.02] font-mono">{log}</div>
+            {logs.length === 0 ? <p className="text-gray-300 text-xs text-center py-8">Aucune activité</p> : logs.map((log, i) => (
+              <div key={i} className="text-[11px] text-gray-500 py-2 px-3 rounded bg-gray-50 font-mono">{log}</div>
             ))}
           </div>
         </div>
@@ -502,13 +452,13 @@ export default function Home() {
 
       {/* ═══ MODAL ═══ */}
       {showNewGroupModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70]">
-          <div className="bg-[#1a1a24] rounded-xl p-6 max-w-sm w-full mx-4 border border-white/[0.06]">
-            <h3 className="font-bold mb-4 text-white/80">Nouveau groupe</h3>
-            <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Nom du groupe…" className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg mb-4 focus:border-violet-500/50 focus:outline-none text-sm text-white placeholder:text-white/20" onKeyDown={e => e.key==='Enter' && createNewGroup()} autoFocus />
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[70]">
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl border border-gray-200">
+            <h3 className="font-bold mb-4 text-gray-700">Nouveau groupe</h3>
+            <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Nom du groupe…" className="w-full px-4 py-2.5 border border-gray-300 rounded-lg mb-4 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 text-sm" onKeyDown={e => e.key==='Enter' && createNewGroup()} autoFocus />
             <div className="flex gap-2">
               <button onClick={createNewGroup} className="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-semibold">Créer</button>
-              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-white/5 hover:bg-white/10 text-white/60 rounded-lg text-sm font-medium">Annuler</button>
+              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium">Annuler</button>
             </div>
           </div>
         </div>
