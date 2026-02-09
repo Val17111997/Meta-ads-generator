@@ -203,6 +203,21 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white flex flex-col" style={{ fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      <style>{`
+        /* Dark theme overrides for hover states in child components */
+        tr:hover td, tr:hover td * { color: rgba(255,255,255,0.9) !important; }
+        tr:hover { background: rgba(255,255,255,0.05) !important; }
+        tr:hover .bg-gray-50, tr:hover .bg-purple-50 { background: rgba(139,92,246,0.1) !important; }
+        .hover\\:bg-gray-50:hover, .hover\\:bg-purple-50:hover { background: rgba(255,255,255,0.05) !important; }
+        .hover\\:bg-gray-100:hover { background: rgba(255,255,255,0.08) !important; }
+        td { color: rgba(255,255,255,0.6) !important; border-color: rgba(255,255,255,0.04) !important; }
+        /* Prompt text always visible */
+        td p, td span, td div { color: inherit !important; }
+        /* Keep colored badges readable */
+        .bg-green-100 span, .bg-blue-100 span, .bg-red-100 span, .bg-purple-100 span { color: inherit !important; }
+        /* Select dropdowns */
+        select option { background: #1a1a24; color: white; }
+      `}</style>
 
       {/* ═══ HEADER ═══ */}
       <header className="sticky top-0 z-50 bg-[#0a0a0f]/90 backdrop-blur-xl border-b border-white/[0.06]">
