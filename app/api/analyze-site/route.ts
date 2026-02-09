@@ -110,11 +110,16 @@ FORMAT DE RÉPONSE (JSON strict) :
   "positioning": "positionnement en 1-2 phrases",
   "usps": ["USP 1", "USP 2", "USP 3"],
   "values": ["valeur 1", "valeur 2", "valeur 3"],
-  "products": ["produit/service 1", "produit/service 2", "produit/service 3"],
+  "products": ["produit/catégorie 1", "produit/catégorie 2", "produit/catégorie 3"],
   "targetAudience": "description de la cible principale",
   "tone": "ton de communication de la marque",
   "socialProof": ["preuve sociale 1", "preuve sociale 2"]
 }
+
+IMPORTANT pour les produits : liste chaque CATÉGORIE ou TYPE de produit distinct, pas des produits individuels.
+Par exemple pour une pépinière : "Arbustes", "Vivaces", "Fruitiers", "Grimpantes", "Conifères"
+Par exemple pour une boutique de vêtements : "Robes", "Pantalons", "Accessoires", "Chaussures"
+Ces catégories serviront de groupes de produits pour la génération de visuels ciblés.
 
 Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
 
@@ -153,13 +158,14 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
   return JSON.parse(cleanContent);
 }
 
-// ── Étape 2b : Générer des prompts à partir d'une analyse existante ──
+// ── Étape 2b : Générer des prompts ciblés sur un produit ──
 async function generatePromptsWithClaude(
   analysis: SiteAnalysis,
   siteUrl: string,
   existingCount: number,
   contentType: 'photo' | 'video' | 'both',
-  promptCount: number
+  promptCount: number,
+  targetProduct?: string
 ): Promise<PromptItem[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY non configurée');
@@ -169,6 +175,20 @@ async function generatePromptsWithClaude(
   const variationNote = existingCount > 0
     ? `\n\nIMPORTANT: Cette marque a déjà ${existingCount} prompts en base. Génère des prompts DIFFÉRENTS et NOUVEAUX, avec des angles et concepts variés.`
     : '';
+
+  // ── Instruction produit ciblé ──
+  let productInstruction = '';
+  if (targetProduct) {
+    productInstruction = `\n\nPRODUIT CIBLÉ : "${targetProduct}"
+IMPORTANT : TOUS les prompts doivent mettre en scène SPÉCIFIQUEMENT ce produit/catégorie "${targetProduct}".
+- Chaque prompt doit montrer ce produit en situation
+- Les visuels doivent être cohérents avec ce type de produit
+- Ne mélange PAS avec d'autres catégories de produits de la marque
+- Adapte les compositions, décors et mises en scène à "${targetProduct}"`;
+  } else {
+    productInstruction = `\n\nPRODUITS : ${analysis.products.join(', ')}
+Répartis les prompts entre les différents produits de la marque.`;
+  }
 
   let typeInstruction = '';
   if (contentType === 'photo') {
@@ -186,9 +206,9 @@ MARQUE ANALYSÉE :
 - Positionnement : ${analysis.positioning}
 - USPs : ${analysis.usps.join(', ')}
 - Valeurs : ${analysis.values.join(', ')}
-- Produits : ${analysis.products.join(', ')}
 - Cible : ${analysis.targetAudience}
 - Ton : ${analysis.tone}
+${productInstruction}
 
 CONCEPTS CRÉATIFS 2026 :
 ${conceptsList}
@@ -217,9 +237,10 @@ FORMAT JSON strict :
 
 Génère EXACTEMENT ${promptCount} prompts variés.`;
 
-  const userMessage = `Génère ${promptCount} prompts marketing créatifs pour ${analysis.brandName} (${siteUrl}).\n\nRéponds UNIQUEMENT avec le JSON.`;
+  const productLabel = targetProduct ? ` pour "${targetProduct}"` : '';
+  const userMessage = `Génère ${promptCount} prompts marketing créatifs${productLabel} pour ${analysis.brandName} (${siteUrl}).\n\nRéponds UNIQUEMENT avec le JSON.`;
 
-  console.log(`🤖 Appel Claude API (${promptCount} prompts ${contentType})...`);
+  console.log(`🤖 Appel Claude API (${promptCount} prompts ${contentType}${productLabel})...`);
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -347,7 +368,7 @@ Génère EXACTEMENT ${promptCount} variantes.`;
 }
 
 // ── Supabase helpers ──
-async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): Promise<number> {
+async function addPromptsToSupabase(prompts: PromptItem[], brandName: string, productGroup?: string): Promise<number> {
   const clientId = process.env.CLIENT_ID;
   if (!clientId) throw new Error('CLIENT_ID non configuré');
 
@@ -359,6 +380,7 @@ async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): P
     type: p.type || 'photo',
     angle: p.angle || null,
     concept: p.concept || null,
+    product_group: productGroup || null,
     status: 'pending',
     image_url: null,
   }));
@@ -373,7 +395,7 @@ async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): P
     throw new Error('Erreur insertion Supabase: ' + error.message);
   }
 
-  console.log('✅ ' + rows.length + ' prompts ajoutés à Supabase');
+  console.log('✅ ' + rows.length + ' prompts ajoutés à Supabase' + (productGroup ? ` (groupe: ${productGroup})` : ''));
   return rows.length;
 }
 
@@ -397,7 +419,7 @@ async function countExistingPrompts(brandName: string): Promise<number> {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride, sourcePrompts } = body;
+    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride, sourcePrompts, targetProduct } = body;
 
     // ── ACTION : ANALYZE (étape 1) ──
     if (action === 'analyze') {
@@ -435,18 +457,20 @@ export async function POST(request: Request) {
       const brandName = brandOverride || existingAnalysis.brandName;
       const existingCount = await countExistingPrompts(brandName);
 
-      console.log(`🎯 Génération de ${promptCount} prompts ${contentType} pour ${brandName}`);
+      const productLabel = targetProduct ? ` → "${targetProduct}"` : '';
+      console.log(`🎯 Génération de ${promptCount} prompts ${contentType}${productLabel} pour ${brandName}`);
 
       const prompts = await generatePromptsWithClaude(
         existingAnalysis,
         url,
         existingCount,
         contentType,
-        promptCount
+        promptCount,
+        targetProduct
       );
 
       console.log('💾 Ajout à Supabase...');
-      const addedCount = await addPromptsToSupabase(prompts, brandName);
+      const addedCount = await addPromptsToSupabase(prompts, brandName, targetProduct);
 
       return NextResponse.json({
         success: true,
@@ -456,7 +480,8 @@ export async function POST(request: Request) {
         addedToDatabase: addedCount,
         totalForBrand: existingCount + addedCount,
         contentType,
-        message: `${prompts.length} prompts ${contentType} générés pour ${brandName}`,
+        targetProduct: targetProduct || null,
+        message: `${prompts.length} prompts ${contentType} générés pour ${brandName}${productLabel}`,
       });
     }
 
@@ -470,7 +495,6 @@ export async function POST(request: Request) {
 
       const prompts = await generateVariantsWithClaude(sourcePrompts, contentType, promptCount);
 
-      // Récupérer la marque la plus récente du client
       const clientId = process.env.CLIENT_ID || 'default';
       let brandName = brandOverride || 'variants';
       
@@ -499,7 +523,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── LEGACY : ancien comportement (analyze + generate en un seul appel) ──
+    // ── LEGACY ──
     if (!url) {
       return NextResponse.json({ success: false, error: 'URL du site requise' }, { status: 400 });
     }

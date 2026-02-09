@@ -162,6 +162,13 @@ export default function Home() {
 
   // ── Groups ──
   function createNewGroup() { if (!newGroupName.trim() || productGroups[newGroupName]) return; setProductGroups(prev => ({ ...prev, [newGroupName]: [] })); setNewGroupName(''); setShowNewGroupModal(false); }
+  function handleCreateGroups(groups: string[]) {
+    setProductGroups(prev => {
+      const updated = { ...prev };
+      groups.forEach(g => { if (!updated[g]) updated[g] = []; });
+      return updated;
+    });
+  }
   function processFilesForGroup(g: string, files: FileList|File[]) {
     const arr = Array.from(files).filter(f => f.type.startsWith('image/')); if (!arr.length) return;
     setUploading(true); let d = 0;
@@ -285,7 +292,7 @@ export default function Home() {
           {activeTab === 'strategy' && (
             <div className="space-y-6">
               <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Stratégie de contenu</h2><p className="text-gray-400 text-sm mt-1">Analyse un site et génère des prompts optimisés</p></div>
-              <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} />
+              <SiteAnalyzer onPromptsGenerated={handlePromptsGenerated} productGroups={Object.keys(productGroups)} onCreateGroups={handleCreateGroups} />
             </div>
           )}
 
@@ -321,6 +328,7 @@ export default function Home() {
                           <div className="flex items-center justify-between mb-2">
                             <span className="font-medium text-sm text-gray-700">{gn} <span className="text-gray-400">({images.length})</span></span>
                             <div className="flex gap-1">
+                              <button onClick={() => setActiveTab('strategy')} className="px-2 py-1 bg-purple-50 text-purple-600 rounded text-xs font-medium hover:bg-purple-100" title="Générer des prompts pour ce groupe">✨ Prompts</button>
                               <label className="px-2 py-1 bg-violet-100 text-violet-600 rounded text-xs cursor-pointer hover:bg-violet-200 font-medium">+ Photo<input type="file" className="hidden" accept="image/*" multiple onChange={e => handleGroupImageUpload(gn,e)} /></label>
                               <button onClick={() => deleteGroup(gn)} className="px-2 py-1 text-red-400 hover:text-red-600 text-xs">🗑️</button>
                             </div>

@@ -23,6 +23,8 @@ interface PromptItem {
 
 interface SiteAnalyzerProps {
   onPromptsGenerated?: () => void;
+  productGroups?: string[];
+  onCreateGroups?: (groups: string[]) => void;
 }
 
 const LS_KEY = 'siteAnalyzerState';
@@ -123,7 +125,7 @@ function EditableList({ label, items, onChange }: { label: string; items: string
 }
 
 // ── Composant principal ──
-export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) {
+export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], onCreateGroups }: SiteAnalyzerProps) {
   const [url, setUrl] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<SiteAnalysis | null>(null);
@@ -135,8 +137,12 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
   const [lastPrompts, setLastPrompts] = useState<PromptItem[] | null>(null);
   const [showPrompts, setShowPrompts] = useState(false);
   const [generatedCounts, setGeneratedCounts] = useState<{ photo: number; video: number; both: number }>({ photo: 0, video: 0, both: 0 });
-  const [generationHistory, setGenerationHistory] = useState<{ type: string; count: number; timestamp: number }[]>([]);
+  const [generationHistory, setGenerationHistory] = useState<{ type: string; count: number; timestamp: number; product?: string }[]>([]);
   const [restored, setRestored] = useState(false);
+
+  // ── Product group targeting ──
+  const [selectedProduct, setSelectedProduct] = useState<string>('');
+  const [groupsCreated, setGroupsCreated] = useState(false);
 
   // ── Restaurer depuis localStorage ──
   useEffect(() => {
@@ -150,6 +156,8 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
         if (data.generatedCounts) setGeneratedCounts(data.generatedCounts);
         if (data.generationHistory) setGenerationHistory(data.generationHistory);
         if (data.promptCount) setPromptCount(data.promptCount);
+        if (data.selectedProduct) setSelectedProduct(data.selectedProduct);
+        if (data.groupsCreated) setGroupsCreated(data.groupsCreated);
       }
     } catch {}
     setRestored(true);
@@ -159,9 +167,9 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
   useEffect(() => {
     if (!restored) return;
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({ url, analysis, existingCount, generatedCounts, generationHistory, promptCount }));
+      localStorage.setItem(LS_KEY, JSON.stringify({ url, analysis, existingCount, generatedCounts, generationHistory, promptCount, selectedProduct, groupsCreated }));
     } catch {}
-  }, [url, analysis, existingCount, generatedCounts, generationHistory, promptCount, restored]);
+  }, [url, analysis, existingCount, generatedCounts, generationHistory, promptCount, selectedProduct, groupsCreated, restored]);
 
   // ── Helpers pour modifier l'analyse ──
   const updateAnalysis = (field: keyof SiteAnalysis, value: any) => {
@@ -169,10 +177,16 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
     setAnalysis({ ...analysis, [field]: value });
   };
 
+  // ── Produits détectés qui ne sont pas encore des groupes ──
+  const missingGroups = analysis
+    ? analysis.products.filter(p => !productGroups.includes(p))
+    : [];
+
   const analyzeSite = async () => {
     if (!url.trim()) { setStatus('❌ Entre une URL'); return; }
     setAnalyzing(true); setAnalysis(null); setLastPrompts(null);
     setGenerationHistory([]); setGeneratedCounts({ photo: 0, video: 0, both: 0 });
+    setSelectedProduct(''); setGroupsCreated(false);
     setStatus('🌐 Connexion au site...');
     try {
       setTimeout(() => setStatus('📥 Récupération du contenu...'), 2000);
@@ -189,25 +203,43 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
     finally { setAnalyzing(false); }
   };
 
+  const createGroupsFromAnalysis = () => {
+    if (!analysis || !onCreateGroups) return;
+    const newGroups = analysis.products.filter(p => !productGroups.includes(p));
+    if (newGroups.length > 0) {
+      onCreateGroups(newGroups);
+      setGroupsCreated(true);
+      setStatus(`✅ ${newGroups.length} groupe(s) créé(s) ! Ajoute les photos dans l'onglet Assets.`);
+    }
+  };
+
   const generatePrompts = async (contentType: 'photo' | 'video' | 'both') => {
     if (!analysis) return;
     setGenerating(true); setGeneratingType(contentType); setLastPrompts(null); setShowPrompts(false);
     const typeLabel = contentType === 'photo' ? '📷 images' : contentType === 'video' ? '🎬 vidéos' : '📷🎬 mixtes';
-    setStatus(`✍️ Génération de ${promptCount} prompts ${typeLabel}...`);
+    const productLabel = selectedProduct ? ` pour "${selectedProduct}"` : '';
+    setStatus(`✍️ Génération de ${promptCount} prompts ${typeLabel}${productLabel}...`);
     try {
-      setTimeout(() => setStatus(`🧠 Claude crée les prompts ${typeLabel}...`), 3000);
+      setTimeout(() => setStatus(`🧠 Claude crée les prompts ${typeLabel}${productLabel}...`), 3000);
       setTimeout(() => setStatus('💾 Ajout à la base de données...'), 15000);
       const response = await fetch('/api/analyze-site', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim(), action: 'generate', analysis, contentType, promptCount }),
+        body: JSON.stringify({
+          url: url.trim(),
+          action: 'generate',
+          analysis,
+          contentType,
+          promptCount,
+          targetProduct: selectedProduct || undefined,
+        }),
       });
       const data = await response.json();
       if (data.success) {
         setLastPrompts(data.prompts);
         setExistingCount(data.totalForBrand || existingCount + (data.promptCount || 0));
         setGeneratedCounts(prev => ({ ...prev, [contentType]: prev[contentType] + (data.promptCount || 0) }));
-        setGenerationHistory(prev => [{ type: contentType, count: data.promptCount || 0, timestamp: Date.now() }, ...prev]);
-        setStatus(`✅ ${data.promptCount} prompts ${typeLabel} ajoutés !`);
+        setGenerationHistory(prev => [{ type: contentType, count: data.promptCount || 0, timestamp: Date.now(), product: selectedProduct || undefined }, ...prev]);
+        setStatus(`✅ ${data.promptCount} prompts ${typeLabel}${productLabel} ajoutés !`);
         if (onPromptsGenerated) onPromptsGenerated();
       } else { setStatus(`❌ ${data.error || 'Erreur lors de la génération'}`); }
     } catch (error: any) { setStatus(`❌ Erreur: ${error.message}`); }
@@ -275,7 +307,7 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
               <EditableField label="Cible :" value={analysis.targetAudience} onChange={(v) => updateAnalysis('targetAudience', v)} />
               <EditableField label="Ton :" value={analysis.tone} onChange={(v) => updateAnalysis('tone', v)} />
               <EditableList label="USPs :" items={analysis.usps} onChange={(items) => updateAnalysis('usps', items)} />
-              <EditableList label="Produits :" items={analysis.products} onChange={(items) => updateAnalysis('products', items)} />
+              <EditableList label="Produits / Catégories :" items={analysis.products} onChange={(items) => updateAnalysis('products', items)} />
               <EditableList label="Valeurs :" items={analysis.values} onChange={(items) => updateAnalysis('values', items)} />
             </div>
 
@@ -284,6 +316,38 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
             )}
           </div>
 
+          {/* ── CRÉER LES GROUPES DE PRODUITS ── */}
+          {onCreateGroups && missingGroups.length > 0 && !groupsCreated && (
+            <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-bold text-amber-800 text-sm flex items-center gap-2">📂 Groupes de produits détectés</h3>
+                  <p className="text-xs text-amber-600 mt-1">
+                    Ces catégories ne sont pas encore dans tes Assets. Crée-les pour y ajouter les photos et générer des prompts ciblés.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {missingGroups.map(g => (
+                      <span key={g} className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs rounded-lg font-medium border border-amber-200">{g}</span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={createGroupsFromAnalysis}
+                  className="ml-4 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold transition-all hover:shadow-md active:scale-95 flex-shrink-0"
+                >
+                  ✅ Créer {missingGroups.length} groupe{missingGroups.length > 1 ? 's' : ''}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {groupsCreated && missingGroups.length === 0 && (
+            <div className="bg-green-50 rounded-xl p-3 border border-green-200 text-green-700 text-sm font-medium flex items-center gap-2">
+              ✅ Tous les groupes sont créés ! Ajoute les photos dans l'onglet <strong>Assets</strong>.
+            </div>
+          )}
+
+          {/* ── SECTION GÉNÉRATION ── */}
           <div className="bg-gray-50 rounded-xl p-5 border border-gray-200">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-gray-800">
@@ -297,7 +361,74 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
                 </select>
               </div>
             </div>
-            {totalGenerated === 0 && <p className="text-sm text-gray-500 mb-3">Choisis le type de contenu. Les prompts seront basés sur l'analyse ci-dessus.</p>}
+
+            {/* ── SÉLECTEUR DE PRODUIT ── */}
+            {(productGroups.length > 0 || analysis.products.length > 0) && (
+              <div className="mb-4 p-3 bg-white rounded-lg border border-gray-200">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  🎯 Produit ciblé
+                  <span className="font-normal text-gray-400 ml-1">(les prompts seront ciblés sur ce produit)</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setSelectedProduct('')}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${
+                      !selectedProduct
+                        ? 'bg-purple-100 border-purple-300 text-purple-700'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                    }`}
+                  >
+                    Tous les produits
+                  </button>
+                  {/* Show product groups from Assets first (they have photos) */}
+                  {productGroups.map(g => (
+                    <button
+                      key={g}
+                      onClick={() => setSelectedProduct(g)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border flex items-center gap-1.5 ${
+                        selectedProduct === g
+                          ? 'bg-purple-100 border-purple-300 text-purple-700'
+                          : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400" title="Photos uploadées"></span>
+                      {g}
+                    </button>
+                  ))}
+                  {/* Show detected products that aren't in groups yet */}
+                  {analysis.products
+                    .filter(p => !productGroups.includes(p))
+                    .map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setSelectedProduct(p)}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border flex items-center gap-1.5 ${
+                          selectedProduct === p
+                            ? 'bg-purple-100 border-purple-300 text-purple-700'
+                            : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300" title="Pas encore de photos"></span>
+                        {p}
+                      </button>
+                    ))}
+                </div>
+                {selectedProduct && !productGroups.includes(selectedProduct) && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    ⚠️ Ce groupe n'a pas encore de photos. Les prompts seront générés et taggés, mais pense à ajouter les images dans Assets avant de générer les visuels.
+                  </p>
+                )}
+                {selectedProduct && productGroups.includes(selectedProduct) && (
+                  <p className="mt-2 text-xs text-green-600">
+                    ✅ Groupe avec photos — les visuels utiliseront automatiquement les bonnes images.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {totalGenerated === 0 && !selectedProduct && <p className="text-sm text-gray-500 mb-3">Choisis un produit ciblé pour des prompts précis, ou génère pour tous les produits.</p>}
+            {totalGenerated === 0 && selectedProduct && <p className="text-sm text-gray-500 mb-3">Les prompts seront spécifiquement conçus pour <strong>"{selectedProduct}"</strong>.</p>}
+
             <div className="grid grid-cols-3 gap-3">
               {(['photo', 'video', 'both'] as const).map((type) => {
                 const isActive = generating && generatingType === type;
@@ -318,12 +449,15 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
                 );
               })}
             </div>
+
             {generationHistory.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-gray-200">
                 <span className="text-xs text-gray-500 font-medium self-center">Historique :</span>
                 {generationHistory.map((gen, i) => (
                   <span key={i} className="px-3 py-1 bg-white text-gray-600 rounded-full text-xs font-medium border border-gray-200">
-                    {typeIcon(gen.type)} ×{gen.count} — {new Date(gen.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    {typeIcon(gen.type)} ×{gen.count}
+                    {gen.product && <span className="text-purple-500 ml-1">• {gen.product}</span>}
+                    {' — '}{new Date(gen.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 ))}
               </div>
@@ -343,6 +477,7 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
                         <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">{p.angle}</span>
                         <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">{p.concept}</span>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${p.type === 'video' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{p.type} • {p.format}</span>
+                        {selectedProduct && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs font-medium">🎯 {selectedProduct}</span>}
                       </div>
                       <p className="text-gray-700">{p.prompt}</p>
                     </div>
