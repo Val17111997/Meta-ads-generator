@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 import SiteAnalyzer from './components/SiteAnalyzer';
 import PromptsTable from './components/PromptsTable';
+import FavoritesPanel from './components/FavoritesPanel';
+import type { FavoriteItem } from './components/FavoritesPanel';
 
 // ============================================================
 // Helper : fetch sécurisé — ne throw jamais, retourne toujours du JSON
@@ -41,6 +43,7 @@ export default function Home() {
   const [includeLogo, setIncludeLogo] = useState(false);
   const [videoEngine, setVideoEngine] = useState<'veo' | 'kling'>('veo');
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
 
   const isGeneratingRef = useRef(false);
   const autoModeRef = useRef(false);
@@ -56,7 +59,6 @@ export default function Home() {
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev.slice(0, 19)]);
   };
 
-  // Messages user-friendly (jamais de messages techniques)
   const USER_MESSAGES = {
     serverBusy: '⏳ Le serveur est occupé, nouvelle tentative automatique…',
     networkError: '📡 Problème de connexion, nouvelle tentative…',
@@ -65,12 +67,51 @@ export default function Home() {
     noImages: '📸 Ajoute des images produit pour commencer.',
   };
 
-  // Callback quand SiteAnalyzer génère des prompts → refresh stats + table
   const handlePromptsGenerated = () => {
     loadStats();
     promptsTableRef.current?.reload();
     addLog('📋 Nouveaux prompts ajoutés — stats et tableau mis à jour');
   };
+
+  // ── Favoris ──
+  function addToFavorites(img: { url: string; prompt: string; timestamp: number; mediaType?: string }) {
+    setFavorites(prev => {
+      if (prev.some(f => f.prompt === img.prompt)) {
+        addLog('⭐ Déjà en favoris');
+        return prev;
+      }
+      const fav: FavoriteItem = {
+        id: `fav-${img.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+        url: img.url,
+        prompt: img.prompt,
+        mediaType: img.mediaType,
+        timestamp: img.timestamp,
+      };
+      addLog('⭐ Ajouté aux favoris');
+      return [fav, ...prev];
+    });
+  }
+
+  function removeFavorite(id: string) {
+    setFavorites(prev => prev.filter(f => f.id !== id));
+  }
+
+  function clearAllFavorites() {
+    if (confirm('Supprimer tous les favoris ?')) {
+      setFavorites([]);
+      localStorage.removeItem('favorites');
+      addLog('🗑️ Favoris vidés');
+    }
+  }
+
+  // Persister les favoris
+  useEffect(() => {
+    if (favorites.length > 0) {
+      try { localStorage.setItem('favorites', JSON.stringify(favorites)); } catch { /* silencieux */ }
+    } else {
+      localStorage.removeItem('favorites');
+    }
+  }, [favorites]);
 
   useEffect(() => {
     loadStats();
@@ -124,6 +165,17 @@ export default function Home() {
         addLog(`🎬 Polling vidéo repris`);
       } catch (e) {
         localStorage.removeItem('videoPolling');
+      }
+    }
+
+    const savedFavorites = localStorage.getItem('favorites');
+    if (savedFavorites) {
+      try {
+        const parsed = JSON.parse(savedFavorites);
+        setFavorites(parsed);
+        addLog(`⭐ ${parsed.length} favori(s) restauré(s)`);
+      } catch (e) {
+        localStorage.removeItem('favorites');
       }
     }
   }, []);
@@ -215,14 +267,14 @@ export default function Home() {
   useEffect(() => {
     if (Object.keys(productGroups).length > 0) {
       try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } 
-      catch (e) { /* silencieux */ }
+      catch { /* silencieux */ }
     }
   }, [productGroups]);
 
   useEffect(() => {
     if (brandAssets.length > 0) {
       try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } 
-      catch (e) { /* silencieux */ }
+      catch { /* silencieux */ }
     }
   }, [brandAssets]);
 
@@ -235,7 +287,7 @@ export default function Home() {
           })));
           localStorage.setItem('generatedImages', JSON.stringify(compressed));
           localStorage.setItem('batchCount', batchCount.toString());
-        } catch (e) { /* silencieux */ }
+        } catch { /* silencieux */ }
       };
       saveCompressed();
     } else if (generatedImages.length === 0) {
@@ -326,7 +378,6 @@ export default function Home() {
           setStats(prev => ({ generated: prev.generated + 1, remaining: data.remaining, total: prev.total }));
           addLog(`✅ Média généré avec succès`);
         }
-        // Refresh table pour voir le prompt passer en "generated"
         promptsTableRef.current?.reload();
       } else {
         const msg = data.message || '';
@@ -482,8 +533,8 @@ export default function Home() {
 
   function clearAllData() {
     if (confirm('Tout supprimer ?')) {
-      setProductGroups({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null);
-      localStorage.removeItem('productGroups'); localStorage.removeItem('brandAssets'); localStorage.removeItem('generatedImages'); localStorage.removeItem('batchCount'); localStorage.removeItem('videoPolling');
+      setProductGroups({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]);
+      localStorage.removeItem('productGroups'); localStorage.removeItem('brandAssets'); localStorage.removeItem('generatedImages'); localStorage.removeItem('batchCount'); localStorage.removeItem('videoPolling'); localStorage.removeItem('favorites');
       addLog('🗑️ Tout effacé');
     }
   }
@@ -507,7 +558,7 @@ export default function Home() {
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
       addLog(`✅ ZIP téléchargé`);
       return true;
-    } catch (e) { addLog('⚠️ Erreur lors du téléchargement'); return false; }
+    } catch { addLog('⚠️ Erreur lors du téléchargement'); return false; }
   }
 
   return (
@@ -675,18 +726,8 @@ export default function Home() {
             </label>
             <div className="flex items-center gap-2 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">
               <span className="font-medium text-gray-700">🎬 Moteur vidéo:</span>
-              <button
-                onClick={() => setVideoEngine('veo')}
-                className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-              >
-                Veo 3.1
-              </button>
-              <button
-                onClick={() => setVideoEngine('kling')}
-                className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-              >
-                Kling 2.6
-              </button>
+              <button onClick={() => setVideoEngine('veo')} className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'veo' ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>Veo 3.1</button>
+              <button onClick={() => setVideoEngine('kling')} className={`px-3 py-1 rounded-lg text-sm font-semibold transition-all ${videoEngine === 'kling' ? 'bg-purple-600 text-white shadow' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>Kling 2.6</button>
             </div>
           </div>
           <div className="flex gap-4 mb-4">
@@ -753,12 +794,22 @@ export default function Home() {
                     {img.mediaType === 'video' && <div className="absolute top-2 right-2 bg-red-600 text-white px-2 py-1 rounded text-xs font-bold">🎬</div>}
                   </div>
                   <p className="text-xs text-gray-600 mb-2 line-clamp-2">{img.prompt}</p>
-                  <button onClick={() => downloadSingleImage(img.url, img.prompt, img.timestamp)} className="w-full py-2 bg-green-600 text-white text-sm rounded font-semibold">📥</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => addToFavorites(img)} className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm rounded font-semibold transition-colors">⭐</button>
+                    <button onClick={() => downloadSingleImage(img.url, img.prompt, img.timestamp)} className="flex-1 py-2 bg-green-600 text-white text-sm rounded font-semibold">📥</button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
+
+        <FavoritesPanel
+          favorites={favorites}
+          onRemove={removeFavorite}
+          onClearAll={clearAllFavorites}
+          onVariantsGenerated={handlePromptsGenerated}
+        />
 
         <div className="mt-8 text-center text-gray-500 text-sm">
           <p>Made with ❤️ by Valentin</p>

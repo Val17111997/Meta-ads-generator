@@ -25,6 +25,137 @@ interface SiteAnalyzerProps {
   onPromptsGenerated?: () => void;
 }
 
+// ── Composant champ texte éditable ──
+function EditableField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const save = () => { onChange(draft); setEditing(false); };
+  const cancel = () => { setDraft(value); setEditing(false); };
+
+  if (editing) {
+    return (
+      <div>
+        <span className="font-semibold text-gray-700 text-sm">{label}</span>
+        <div className="flex gap-1 mt-1">
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); }}
+            className="flex-1 px-2 py-1 border border-purple-300 rounded text-sm focus:outline-none focus:border-purple-500"
+            autoFocus
+          />
+          <button onClick={save} className="px-2 py-1 bg-purple-600 text-white rounded text-xs font-semibold hover:bg-purple-700">✓</button>
+          <button onClick={cancel} className="px-2 py-1 bg-gray-200 text-gray-600 rounded text-xs font-semibold hover:bg-gray-300">✕</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group cursor-pointer" onClick={() => { setDraft(value); setEditing(true); }}>
+      <span className="font-semibold text-gray-700 text-sm">{label}</span>
+      <p className="text-gray-600 text-sm group-hover:text-purple-700 group-hover:bg-purple-50 rounded px-1 -mx-1 transition-colors">
+        {value || <span className="italic text-gray-400">Cliquer pour ajouter</span>}
+        <span className="opacity-0 group-hover:opacity-100 text-purple-400 ml-1 text-xs transition-opacity">✏️</span>
+      </p>
+    </div>
+  );
+}
+
+// ── Composant liste éditable ──
+function EditableList({ label, items, onChange }: { label: string; items: string[]; onChange: (items: string[]) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [newItem, setNewItem] = useState('');
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+
+  const addItem = () => {
+    if (!newItem.trim()) return;
+    onChange([...items, newItem.trim()]);
+    setNewItem('');
+    setAdding(false);
+  };
+
+  const removeItem = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  const saveEdit = (index: number) => {
+    if (!editDraft.trim()) { removeItem(index); setEditingIndex(null); return; }
+    const updated = [...items];
+    updated[index] = editDraft.trim();
+    onChange(updated);
+    setEditingIndex(null);
+  };
+
+  return (
+    <div>
+      <span className="font-semibold text-gray-700 text-sm">{label}</span>
+      <ul className="text-gray-600 text-sm mt-1 space-y-1">
+        {items.map((item, i) => (
+          <li key={i} className="flex items-start gap-1 group">
+            {editingIndex === i ? (
+              <div className="flex gap-1 flex-1">
+                <input
+                  type="text"
+                  value={editDraft}
+                  onChange={(e) => setEditDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(i); if (e.key === 'Escape') setEditingIndex(null); }}
+                  className="flex-1 px-2 py-0.5 border border-purple-300 rounded text-sm focus:outline-none focus:border-purple-500"
+                  autoFocus
+                />
+                <button onClick={() => saveEdit(i)} className="px-1.5 py-0.5 bg-purple-600 text-white rounded text-xs hover:bg-purple-700">✓</button>
+                <button onClick={() => setEditingIndex(null)} className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300">✕</button>
+              </div>
+            ) : (
+              <>
+                <span className="text-gray-400 select-none">•</span>
+                <span
+                  className="flex-1 cursor-pointer hover:text-purple-700 hover:bg-purple-50 rounded px-1 -mx-1 transition-colors"
+                  onClick={() => { setEditDraft(item); setEditingIndex(i); }}
+                >
+                  {item}
+                  <span className="opacity-0 group-hover:opacity-100 text-purple-400 ml-1 text-xs transition-opacity">✏️</span>
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); removeItem(i); }}
+                  className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs px-1 transition-opacity"
+                  title="Supprimer"
+                >✕</button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      {adding ? (
+        <div className="flex gap-1 mt-1">
+          <input
+            type="text"
+            value={newItem}
+            onChange={(e) => setNewItem(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') addItem(); if (e.key === 'Escape') setAdding(false); }}
+            placeholder="Nouvel élément..."
+            className="flex-1 px-2 py-0.5 border border-purple-300 rounded text-sm focus:outline-none focus:border-purple-500"
+            autoFocus
+          />
+          <button onClick={addItem} className="px-1.5 py-0.5 bg-purple-600 text-white rounded text-xs hover:bg-purple-700">✓</button>
+          <button onClick={() => { setAdding(false); setNewItem(''); }} className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded text-xs hover:bg-gray-300">✕</button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="mt-1 text-xs text-purple-500 hover:text-purple-700 font-medium hover:bg-purple-50 rounded px-1 transition-colors"
+        >
+          + Ajouter
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Composant principal ──
 export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) {
   const [url, setUrl] = useState('');
   
@@ -42,9 +173,14 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
   const [status, setStatus] = useState('');
   const [lastPrompts, setLastPrompts] = useState<PromptItem[] | null>(null);
   const [showPrompts, setShowPrompts] = useState(false);
-  // Track combien ont été générés par type
   const [generatedCounts, setGeneratedCounts] = useState<{ photo: number; video: number; both: number }>({ photo: 0, video: 0, both: 0 });
   const [generationHistory, setGenerationHistory] = useState<{ type: string; count: number; timestamp: number }[]>([]);
+
+  // ── Helpers pour modifier l'analyse ──
+  const updateAnalysis = (field: keyof SiteAnalysis, value: any) => {
+    if (!analysis) return;
+    setAnalysis({ ...analysis, [field]: value });
+  };
 
   // ── Étape 1 : Analyser le site ──
   const analyzeSite = async () => {
@@ -134,22 +270,17 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
     }
   };
 
-  // ── Labels dynamiques ──
   const hasGenerated = (type: 'photo' | 'video' | 'both') => generatedCounts[type] > 0;
   const totalGenerated = generatedCounts.photo + generatedCounts.video + generatedCounts.both;
 
   const getButtonLabel = (type: 'photo' | 'video' | 'both') => {
     const icon = type === 'photo' ? '📷' : type === 'video' ? '🎬' : '📷🎬';
     const name = type === 'photo' ? 'Images' : type === 'video' ? 'Vidéos' : 'Les deux';
-    
-    if (hasGenerated(type)) {
-      return `${icon} + ${promptCount} ${name}`;
-    }
+    if (hasGenerated(type)) return `${icon} + ${promptCount} ${name}`;
     return `${icon} ${promptCount} ${name}`;
   };
 
   const typeIcon = (type: string) => type === 'photo' ? '📷' : type === 'video' ? '🎬' : '📷🎬';
-
   const isLoading = analyzing || generating;
 
   return (
@@ -187,7 +318,7 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
         </button>
       </div>
 
-      {/* Status (seulement erreurs ou loading, pas le succès d'analyse) */}
+      {/* Status */}
       {status && (
         <div className={`p-4 rounded-xl mb-4 text-sm font-medium ${
           status.startsWith('✅') ? 'bg-green-50 text-green-700 border border-green-200' :
@@ -198,46 +329,63 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
         </div>
       )}
 
-      {/* ── Résultat de l'analyse ── */}
+      {/* ── Résultat de l'analyse (éditable) ── */}
       {analysis && (
         <div className="space-y-4">
           <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-5 border border-purple-100">
-            <h3 className="font-bold text-lg mb-3 text-purple-800">
-              📊 {analysis.brandName}
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="font-semibold text-gray-700">Positionnement :</span>
-                <p className="text-gray-600">{analysis.positioning}</p>
-              </div>
-              <div>
-                <span className="font-semibold text-gray-700">Cible :</span>
-                <p className="text-gray-600">{analysis.targetAudience}</p>
-              </div>
-              <div>
-                <span className="font-semibold text-gray-700">Ton :</span>
-                <p className="text-gray-600">{analysis.tone}</p>
-              </div>
-              <div>
-                <span className="font-semibold text-gray-700">USPs :</span>
-                <ul className="text-gray-600 list-disc list-inside">
-                  {analysis.usps.slice(0, 3).map((usp, i) => <li key={i}>{usp}</li>)}
-                </ul>
-              </div>
-              {analysis.products.length > 0 && (
-                <div>
-                  <span className="font-semibold text-gray-700">Produits :</span>
-                  <p className="text-gray-600">{analysis.products.join(', ')}</p>
-                </div>
-              )}
-              {analysis.values.length > 0 && (
-                <div>
-                  <span className="font-semibold text-gray-700">Valeurs :</span>
-                  <p className="text-gray-600">{analysis.values.join(', ')}</p>
-                </div>
-              )}
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-lg text-purple-800 flex items-center gap-2">
+                📊
+                <span
+                  className="cursor-pointer hover:bg-purple-100 rounded px-1 transition-colors"
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) => updateAnalysis('brandName', e.currentTarget.textContent || '')}
+                >
+                  {analysis.brandName}
+                </span>
+              </h3>
+              <span className="text-xs text-purple-400 font-medium">Clique sur un champ pour le modifier</span>
             </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+              <EditableField
+                label="Positionnement :"
+                value={analysis.positioning}
+                onChange={(v) => updateAnalysis('positioning', v)}
+              />
+              <EditableField
+                label="Cible :"
+                value={analysis.targetAudience}
+                onChange={(v) => updateAnalysis('targetAudience', v)}
+              />
+              <EditableField
+                label="Ton :"
+                value={analysis.tone}
+                onChange={(v) => updateAnalysis('tone', v)}
+              />
+              <EditableList
+                label="USPs :"
+                items={analysis.usps}
+                onChange={(items) => updateAnalysis('usps', items)}
+              />
+              <EditableList
+                label="Produits :"
+                items={analysis.products}
+                onChange={(items) => updateAnalysis('products', items)}
+              />
+              <EditableList
+                label="Valeurs :"
+                items={analysis.values}
+                onChange={(items) => updateAnalysis('values', items)}
+              />
+            </div>
+
+            {existingCount > 0 && (
+              <div className="mt-3 text-xs text-purple-600 font-medium">
+                📋 {existingCount} prompts déjà en base pour cette marque
+              </div>
+            )}
           </div>
 
           {/* ── Étape 2 : Générer les prompts ── */}
@@ -263,7 +411,7 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
             </div>
 
             {totalGenerated === 0 && (
-              <p className="text-sm text-gray-500 mb-3">Choisis le type de contenu pour lequel générer des prompts marketing :</p>
+              <p className="text-sm text-gray-500 mb-3">Choisis le type de contenu. Les prompts seront basés sur l'analyse ci-dessus.</p>
             )}
 
             <div className="grid grid-cols-3 gap-3">
@@ -299,7 +447,6 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
               })}
             </div>
 
-            {/* Historique des générations */}
             {generationHistory.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-gray-200">
                 <span className="text-xs text-gray-500 font-medium self-center">Historique :</span>
@@ -347,8 +494,8 @@ export default function SiteAnalyzer({ onPromptsGenerated }: SiteAnalyzerProps) 
         {!analysis
           ? '💡 Analyse le site d\'abord, puis choisis le type de prompts à générer.'
           : totalGenerated > 0
-          ? '💡 Chaque clic ajoute de nouveaux prompts différents à la base. Claude varie automatiquement les angles.'
-          : '💡 Après la 1ère génération, tu pourras en ajouter autant que tu veux.'
+          ? '💡 Modifie l\'analyse si besoin, puis clique à nouveau pour ajouter des prompts avec les infos mises à jour.'
+          : '💡 Tu peux modifier les champs de l\'analyse avant de générer. Clique sur un texte pour l\'éditer.'
         }
       </div>
     </div>

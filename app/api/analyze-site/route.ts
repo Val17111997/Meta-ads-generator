@@ -253,6 +253,99 @@ Génère EXACTEMENT ${promptCount} prompts variés.`;
   return result.prompts;
 }
 
+// ── Étape 2c : Générer des variantes à partir de prompts existants ──
+async function generateVariantsWithClaude(
+  sourcePrompts: { prompt: string; type: string }[],
+  contentType: 'photo' | 'video' | 'both',
+  promptCount: number
+): Promise<PromptItem[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY non configurée');
+
+  const sourceList = sourcePrompts.map((p, i) => `${i + 1}. [${p.type}] ${p.prompt}`).join('\n');
+
+  let typeInstruction = '';
+  if (contentType === 'photo') {
+    typeInstruction = 'Génère UNIQUEMENT des prompts "photo".';
+  } else if (contentType === 'video') {
+    typeInstruction = 'Génère UNIQUEMENT des prompts "video" avec mouvements de caméra et actions dynamiques.';
+  } else {
+    typeInstruction = 'Génère un mix de prompts photo ET vidéo.';
+  }
+
+  const systemPrompt = `Tu es un expert en création de contenu publicitaire pour Meta Ads.
+
+L'utilisateur a sélectionné des contenus qu'il considère réussis. Ta mission : générer ${promptCount} VARIANTES inspirées de ces prompts.
+
+PROMPTS SOURCES (ceux qui ont bien marché) :
+${sourceList}
+
+RÈGLES POUR LES VARIANTES :
+- Garde le même style, ton et niveau de qualité que les sources
+- Varie les angles de vue, les compositions, les éclairages, les scènes
+- Garde les mêmes produits/marques référencés dans les sources
+- Chaque variante doit être suffisamment différente pour ne pas être un doublon
+- Prompts en ANGLAIS, 2-4 phrases descriptives
+- Finir par "no text, no watermark"
+- ${typeInstruction}
+
+TYPES DE VARIATIONS À EXPLORER :
+- Même concept, cadrage différent (gros plan → plan large, plongée → contre-plongée)
+- Même produit, contexte/décor différent (intérieur → extérieur, matin → soir)
+- Même angle marketing, exécution créative différente
+- Même ambiance, produit mis en scène différemment
+
+FORMAT JSON strict :
+{
+  "prompts": [
+    {
+      "prompt": "le prompt variante en anglais",
+      "angle": "angle marketing",
+      "concept": "concept créatif",
+      "type": "photo ou video",
+      "format": "9:16 ou 1:1 ou 16:9"
+    }
+  ]
+}
+
+Génère EXACTEMENT ${promptCount} variantes.`;
+
+  const userMessage = `Génère ${promptCount} variantes créatives inspirées de mes ${sourcePrompts.length} prompts favoris.\n\nRéponds UNIQUEMENT avec le JSON.`;
+
+  console.log(`🤖 Appel Claude API (${promptCount} variantes de ${sourcePrompts.length} sources)...`);
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      messages: [{ role: 'user', content: userMessage }],
+      system: systemPrompt,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Erreur Claude API:', errorText);
+    throw new Error('Claude API error: ' + response.status);
+  }
+
+  const data = await response.json();
+  const content = data.content[0]?.text;
+  if (!content) throw new Error('Réponse Claude vide');
+
+  console.log('✅ Variantes reçues');
+
+  const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const result = JSON.parse(cleanContent);
+  return result.prompts;
+}
+
 // ── Supabase helpers ──
 async function addPromptsToSupabase(prompts: PromptItem[], brandName: string): Promise<number> {
   const clientId = process.env.CLIENT_ID;
@@ -304,7 +397,7 @@ async function countExistingPrompts(brandName: string): Promise<number> {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride } = body;
+    const { url, action = 'analyze', analysis: existingAnalysis, contentType = 'both', promptCount = 20, brandOverride, sourcePrompts } = body;
 
     // ── ACTION : ANALYZE (étape 1) ──
     if (action === 'analyze') {
@@ -364,6 +457,45 @@ export async function POST(request: Request) {
         totalForBrand: existingCount + addedCount,
         contentType,
         message: `${prompts.length} prompts ${contentType} générés pour ${brandName}`,
+      });
+    }
+
+    // ── ACTION : VARIANTS (à partir de favoris) ──
+    if (action === 'variants') {
+      if (!sourcePrompts || sourcePrompts.length === 0) {
+        return NextResponse.json({ success: false, error: 'Aucun prompt source fourni.' }, { status: 400 });
+      }
+
+      console.log(`✨ Génération de ${promptCount} variantes à partir de ${sourcePrompts.length} favori(s)`);
+
+      const prompts = await generateVariantsWithClaude(sourcePrompts, contentType, promptCount);
+
+      // Récupérer la marque la plus récente du client
+      const clientId = process.env.CLIENT_ID || 'default';
+      let brandName = brandOverride || 'variants';
+      
+      if (!brandOverride) {
+        const { data: latestPrompt } = await getSupabase()
+          .from('prompts')
+          .select('brand')
+          .eq('client_id', clientId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (latestPrompt?.brand) brandName = latestPrompt.brand;
+      }
+
+      console.log('💾 Ajout à Supabase...');
+      const addedCount = await addPromptsToSupabase(prompts, brandName);
+
+      return NextResponse.json({
+        success: true,
+        action: 'variants',
+        prompts,
+        promptCount: prompts.length,
+        addedToDatabase: addedCount,
+        contentType,
+        message: `${prompts.length} variantes générées`,
       });
     }
 
