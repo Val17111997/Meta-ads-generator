@@ -50,6 +50,8 @@ export default function Home() {
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const [productGroupUrls, setProductGroupUrls] = useState<{ [name: string]: string }>({});
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  const [galleryPage, setGalleryPage] = useState(1);
+  const GALLERY_PER_PAGE = 20;
 
   const isGeneratingRef = useRef(false);
   const autoModeRef = useRef(false);
@@ -488,27 +490,64 @@ export default function Home() {
                   )}
                 </div>
                 <div className="col-span-3">
-                  {generatedImages.length > 0 ? (
-                    <div className="grid grid-cols-4 gap-3">
-                      {generatedImages.map((img, i) => (
-                        <div key={i} className="group bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:border-violet-300 hover:shadow-md transition-all">
-                          <div className="relative aspect-square">
-                            {(img.mediaType === 'video' || img.url.endsWith('.mp4'))
-                              ? <video src={img.url} loop muted className="w-full h-full object-cover" onMouseEnter={e => (e.target as HTMLVideoElement).play()} onMouseLeave={e => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }} />
-                              : <img src={img.url} alt="" className="w-full h-full object-cover" />}
-                            {(img.mediaType === 'video' || img.url.endsWith('.mp4')) && <div className="absolute top-2 right-2 bg-red-500 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
-                          </div>
-                          <div className="p-2">
-                            <p className="text-[10px] text-gray-400 line-clamp-1 mb-2">{img.prompt}</p>
-                            <div className="flex gap-1">
-                              <button onClick={() => addToFavorites(img)} className="flex-1 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-[11px] rounded font-medium transition-colors">⭐</button>
-                              <button onClick={() => downloadSingle(img.url, img.timestamp)} className="flex-1 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-400 text-[11px] rounded font-medium transition-colors">📥</button>
+                  {generatedImages.length > 0 ? (() => {
+                    const totalPages = Math.ceil(generatedImages.length / GALLERY_PER_PAGE);
+                    const paged = generatedImages.slice((galleryPage - 1) * GALLERY_PER_PAGE, galleryPage * GALLERY_PER_PAGE);
+                    return (
+                      <>
+                        <div className="grid grid-cols-4 gap-3">
+                          {paged.map((img, i) => (
+                            <div key={i} className="group bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:border-violet-300 hover:shadow-md transition-all">
+                              <div className="relative aspect-square">
+                                {(img.mediaType === 'video' || img.url.endsWith('.mp4'))
+                                  ? <video src={img.url} loop muted className="w-full h-full object-cover" onMouseEnter={e => (e.target as HTMLVideoElement).play()} onMouseLeave={e => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }} />
+                                  : <img src={img.url} alt="" className="w-full h-full object-cover" />}
+                                {(img.mediaType === 'video' || img.url.endsWith('.mp4')) && <div className="absolute top-2 right-2 bg-red-500 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
+                              </div>
+                              <div className="p-2">
+                                <p className="text-[10px] text-gray-400 line-clamp-1 mb-2">{img.prompt}</p>
+                                <div className="flex gap-1">
+                                  <button onClick={() => addToFavorites(img)} className="flex-1 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 text-[11px] rounded font-medium transition-colors">⭐</button>
+                                  <button onClick={() => downloadSingle(img.url, img.timestamp)} className="flex-1 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-400 text-[11px] rounded font-medium transition-colors">📥</button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
+                        {totalPages > 1 && (
+                          <div className="flex items-center justify-center gap-2 mt-4">
+                            <button
+                              onClick={() => setGalleryPage(p => Math.max(1, p - 1))}
+                              disabled={galleryPage === 1}
+                              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            >
+                              ← Préc
+                            </button>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                              <button
+                                key={p}
+                                onClick={() => setGalleryPage(p)}
+                                className={`w-8 h-8 rounded-lg text-sm font-semibold transition-all ${
+                                  galleryPage === p
+                                    ? 'bg-violet-500 text-white shadow-md'
+                                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setGalleryPage(p => Math.min(totalPages, p + 1))}
+                              disabled={galleryPage === totalPages}
+                              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            >
+                              Suiv →
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })() : (
                     <div className="flex items-center justify-center h-64 rounded-xl border-2 border-dashed border-gray-200">
                       <div className="text-center"><div className="text-5xl mb-3 opacity-15">⬡</div><p className="text-gray-300 text-sm">Les médias apparaîtront ici</p><p className="text-gray-200 text-xs mt-1">Utilise ⚡ Générer ou ▶ Auto</p></div>
                     </div>
