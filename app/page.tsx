@@ -41,7 +41,7 @@ export default function Home() {
   const [newGroupName, setNewGroupName] = useState('');
   const [brandAssets, setBrandAssets] = useState<{ name: string; url: string; type: 'logo' | 'palette' | 'style' }[]>([]);
   const [uploadingBrand, setUploadingBrand] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string }[]>([]);
+  const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string; fileName?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
   const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string; keyIndex?: number } | null>(null);
   const [includeText, setIncludeText] = useState(true);
@@ -77,20 +77,42 @@ export default function Home() {
 
   // ── Persistence ──
   useEffect(() => { try { favorites.length > 0 ? localStorage.setItem('favorites', JSON.stringify(favorites)) : localStorage.removeItem('favorites'); } catch { console.warn('⚠️ localStorage plein (favorites)'); } }, [favorites]);
-  useEffect(() => { if (Object.keys(productGroups).length > 0) { try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch (e) { console.warn('⚠️ localStorage plein (productGroups), nettoyage...'); try { localStorage.removeItem('generatedImages'); localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch { console.error('localStorage irrécupérable'); } } } }, [productGroups]);
+  useEffect(() => { if (Object.keys(productGroups).length > 0) { try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch (e) { console.warn('⚠️ localStorage plein (productGroups)'); } } }, [productGroups]);
   useEffect(() => { Object.keys(productGroupUrls).length > 0 ? localStorage.setItem('productGroupUrls', JSON.stringify(productGroupUrls)) : localStorage.removeItem('productGroupUrls'); }, [productGroupUrls]);
   useEffect(() => { if (brandAssets.length > 0) { try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } catch { console.warn('⚠️ localStorage plein (brandAssets)'); } } }, [brandAssets]);
-  useEffect(() => {
-    if (generatedImages.length > 0 && generatedImages.length < 20) {
-      (async () => { try { const c = await Promise.all(generatedImages.map(async img => ({ ...img, url: img.mediaType === 'video' ? img.url : await compressImage(img.url) }))); localStorage.setItem('generatedImages', JSON.stringify(c)); localStorage.setItem('batchCount', batchCount.toString()); } catch {} })();
-    } else if (generatedImages.length === 0) localStorage.removeItem('generatedImages');
-  }, [generatedImages, batchCount]);
+  // ── Gallery: save to Supabase (no more localStorage for images) ──
+  async function saveToGallery(dataUrl: string, prompt: string, mediaType: string = 'image') {
+    try {
+      const res = await fetch('/api/gallery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl, prompt, mediaType }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        return data.url; // Public URL from Supabase Storage
+      }
+      console.warn('⚠️ Gallery save failed:', data.error);
+      return null;
+    } catch (e) { console.error('Gallery save error:', e); return null; }
+  }
+
+  async function loadGallery() {
+    try {
+      const res = await fetch('/api/gallery');
+      const data = await res.json();
+      if (data.success && data.images) {
+        setGeneratedImages(data.images);
+      }
+    } catch (e) { console.error('Gallery load error:', e); }
+  }
 
   // ── Init ──
   useEffect(() => {
     loadStats();
+    loadGallery(); // Load from Supabase instead of localStorage
     const r = (k: string, s: (v: any) => void) => { const v = localStorage.getItem(k); if (v) try { s(JSON.parse(v)); } catch { localStorage.removeItem(k); } };
-    r('productGroups', setProductGroups); r('productGroupUrls', setProductGroupUrls); r('brandAssets', setBrandAssets); r('generatedImages', setGeneratedImages); r('favorites', setFavorites); r('videoPolling', setVideoPolling);
+    r('productGroups', setProductGroups); r('productGroupUrls', setProductGroupUrls); r('brandAssets', setBrandAssets); r('favorites', setFavorites); r('videoPolling', setVideoPolling);
     const b = localStorage.getItem('batchCount'); if (b) setBatchCount(parseInt(b));
   }, []);
 
@@ -113,9 +135,11 @@ export default function Home() {
       if (data.success && data.done && data.videoUri) {
         addLog('✅ Vidéo Veo prête !'); setCurrentImage(data.videoUri); setCurrentPrompt(videoPolling.prompt);
         const ni = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
-        setGeneratedImages(prev => { const up = [ni, ...prev]; if (up.length === 20) createAndDownloadZip(up, batchCount).then(s => { if (s) { setBatchCount(c => c+1); setGeneratedImages([]); localStorage.removeItem('generatedImages'); }}); return up; });
+        setGeneratedImages(prev => [ni, ...prev]);
         setStats(prev => ({ ...prev, generated: prev.generated+1, remaining: prev.remaining-1 }));
         setVideoPolling(null); localStorage.removeItem('videoPolling'); loadStats();
+        // Save to Supabase Storage in background
+        saveToGallery(data.videoUri, videoPolling.prompt, 'video');
       } else if (data.pending) { retries = 0; setTimeout(poll, 12000); }
       else if (++retries < 30) setTimeout(poll, 15000);
       else { setVideoPolling(null); localStorage.removeItem('videoPolling'); }
@@ -150,9 +174,11 @@ export default function Home() {
         else {
           const ni = { url: data.imageUrl, prompt: data.prompt, timestamp: Date.now(), mediaType: data.mediaType||'image' };
           setCurrentImage(data.imageUrl); setCurrentPrompt(data.prompt);
-          setGeneratedImages(prev => { const u = [ni,...prev]; if (u.length===20) createAndDownloadZip(u,batchCount).then(s => { if (s) { setBatchCount(c=>c+1); setGeneratedImages([]); }}); return u; });
+          setGeneratedImages(prev => [ni,...prev]);
           setStats(prev => ({ generated: prev.generated+1, remaining: data.remaining, total: prev.total }));
           addLog('✅ Média généré');
+          // Save to Supabase Storage in background
+          saveToGallery(data.imageUrl, data.prompt, data.mediaType || 'image');
         }
         promptsTableRef.current?.reload();
       } else { setError('⚠️ Génération échouée'); setTimeout(() => setError(null), 5000); }
@@ -201,8 +227,18 @@ export default function Home() {
   }
   function downloadSingle(url: string, ts: number) { try { const a = document.createElement('a'); a.href=url; a.download=`meta-ad-${ts}.${url.startsWith('data:video')?'mp4':'png'}`; document.body.appendChild(a); a.click(); document.body.removeChild(a); } catch {} }
   function downloadAll() { if (generatedImages.length) createAndDownloadZip(generatedImages, batchCount); }
-  function clearGallery() { if (confirm('Vider ?')) { setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); localStorage.removeItem('generatedImages'); } }
-  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','generatedImages','batchCount','videoPolling','favorites','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); } }
+  function clearGallery() {
+    if (confirm('Vider la galerie ?')) {
+      // Delete all from Supabase Storage
+      generatedImages.forEach(img => {
+        if ((img as any).fileName) {
+          fetch('/api/gallery', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: (img as any).fileName }) }).catch(() => {});
+        }
+      });
+      setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt('');
+    }
+  }
+  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','batchCount','videoPolling','favorites','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); } }
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
     try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meta-ads-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
   }
@@ -397,7 +433,7 @@ export default function Home() {
                   {currentImage ? (
                     <div>
                       <div className="relative aspect-square rounded-lg overflow-hidden mb-3 border-2 border-violet-200 shadow-lg shadow-violet-100">
-                        {currentImage.startsWith('data:video') ? <video src={currentImage} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
+                        {(currentImage.startsWith('data:video') || (currentImage.includes('/gallery/') && currentImage.endsWith('.mp4'))) ? <video src={currentImage} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={currentImage} alt="" className="w-full h-full object-cover" />}
                         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-2">
                           <span className="text-[10px] font-semibold text-emerald-400">✓ Généré</span>
                         </div>
@@ -420,10 +456,10 @@ export default function Home() {
                       {generatedImages.map((img, i) => (
                         <div key={i} className="group bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:border-violet-300 hover:shadow-md transition-all">
                           <div className="relative aspect-square">
-                            {img.mediaType === 'video'
+                            {(img.mediaType === 'video' || img.url.endsWith('.mp4'))
                               ? <video src={img.url} loop muted className="w-full h-full object-cover" onMouseEnter={e => (e.target as HTMLVideoElement).play()} onMouseLeave={e => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }} />
                               : <img src={img.url} alt="" className="w-full h-full object-cover" />}
-                            {img.mediaType === 'video' && <div className="absolute top-2 right-2 bg-red-500 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
+                            {(img.mediaType === 'video' || img.url.endsWith('.mp4')) && <div className="absolute top-2 right-2 bg-red-500 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">VID</div>}
                           </div>
                           <div className="p-2">
                             <p className="text-[10px] text-gray-400 line-clamp-1 mb-2">{img.prompt}</p>

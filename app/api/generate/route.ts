@@ -239,8 +239,8 @@ async function generateWithProductImage(
     });
 
   let textInstructions = shouldIncludeText
-    ? '\n\nTEXT OVERLAY:\n- Add compelling French marketing text overlay on the image\n- Include catchy headlines, product benefits, or promotional messages\n- Use modern, readable typography\n- Ensure text is clearly visible and well-positioned'
-    : '\n\nNO TEXT RULE:\n- DO NOT add ANY text, words, letters, numbers, or characters on the image\n- Pure visual composition without any textual elements';
+    ? '\n\nTEXT OVERLAY:\n- Add compelling French marketing text overlay on the image\n- Include catchy headlines, product benefits, or promotional messages\n- Use modern, readable typography\n- Ensure text is clearly visible and well-positioned\n- ALL text in the image MUST be in FRENCH.'
+    : '\n\nCRITICAL — ABSOLUTELY NO TEXT:\n- DO NOT add ANY text, words, letters, numbers, characters, watermarks, captions, headlines, labels, or typography anywhere on the image\n- This is the MOST IMPORTANT rule: the image must contain ZERO text of any kind\n- No brand names, no slogans, no prices, no hashtags, no URLs — NOTHING written\n- If you include any text at all, the image will be rejected\n- Pure visual composition only';
   
   let brandInstructions = '';
   const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
@@ -279,8 +279,7 @@ CRITICAL PRODUCT RULES:
 ${textInstructions}
 ${brandInstructions}
 
-Professional marketing photography. High quality. Eye-catching for social media. 
-ALL TEXT IN THE IMAGE MUST BE IN FRENCH.`
+Professional marketing photography. High quality. Eye-catching for social media.`
                 }
               ]
             }],
