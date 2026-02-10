@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import JSZip from 'jszip';
 
 export interface FavoriteItem {
   id: string;
@@ -21,6 +22,7 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [zipping, setZipping] = useState(false);
   const [status, setStatus] = useState('');
   const [variantCount, setVariantCount] = useState(10);
   const [contentType, setContentType] = useState<'photo' | 'video' | 'both'>('both');
@@ -38,6 +40,57 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(favorites.map(f => f.id)));
+    }
+  };
+
+  const downloadSelectedZip = async () => {
+    const selected = favorites.filter(f => selectedIds.has(f.id));
+    if (selected.length === 0) return;
+
+    setZipping(true);
+    setStatus(`📦 Préparation du ZIP (${selected.length} fichiers)...`);
+
+    try {
+      const zip = new JSZip();
+
+      for (let i = 0; i < selected.length; i++) {
+        const fav = selected[i];
+        const isVideo = fav.mediaType === 'video' || fav.url.endsWith('.mp4');
+        const ext = isVideo ? 'mp4' : 'png';
+        const fileName = `favori-${i + 1}.${ext}`;
+
+        if (fav.url.startsWith('data:')) {
+          // Base64 data URL
+          const base64 = fav.url.split(',')[1];
+          zip.file(fileName, base64, { base64: true });
+        } else {
+          // Remote URL (Supabase Storage) — fetch the binary
+          try {
+            const resp = await fetch(fav.url);
+            const blob = await resp.blob();
+            zip.file(fileName, blob);
+          } catch (e) {
+            console.warn(`⚠️ Impossible de télécharger: ${fav.url}`);
+          }
+        }
+
+        setStatus(`📦 ${i + 1}/${selected.length} fichiers ajoutés...`);
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `favoris-${selected.length}-${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      setStatus(`✅ ZIP téléchargé (${selected.length} fichiers)`);
+    } catch (error: any) {
+      setStatus(`❌ Erreur ZIP: ${error.message}`);
+    } finally {
+      setZipping(false);
+      setTimeout(() => setStatus(''), 4000);
     }
   };
 
@@ -95,7 +148,7 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
                 : 'bg-amber-500 hover:bg-amber-600 text-white'
             }`}
           >
-            {selectMode ? '✕ Annuler' : '✨ Créer des variantes'}
+            {selectMode ? '✕ Annuler' : '☑️ Sélectionner'}
           </button>
           <button onClick={onClearAll} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold">
             🗑️
@@ -147,18 +200,32 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
             </div>
 
             {selectedCount > 0 && (
-              <button
-                onClick={generateVariants}
-                disabled={generating}
-                className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-bold hover:shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait"
-              >
-                {generating ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
-                    En cours...
-                  </span>
-                ) : `✨ Générer ${variantCount} variantes de ${selectedCount} favori(s)`}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={downloadSelectedZip}
+                  disabled={zipping}
+                  className="px-4 py-1.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg text-sm font-bold hover:shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait"
+                >
+                  {zipping ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+                      ZIP...
+                    </span>
+                  ) : `📦 ZIP (${selectedCount})`}
+                </button>
+                <button
+                  onClick={generateVariants}
+                  disabled={generating}
+                  className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-bold hover:shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait"
+                >
+                  {generating ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+                      En cours...
+                    </span>
+                  ) : `✨ ${variantCount} variantes`}
+                </button>
+              </div>
             )}
           </div>
         </div>

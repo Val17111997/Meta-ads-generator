@@ -69,14 +69,33 @@ export default function Home() {
   function addToFavorites(img: { url: string; prompt: string; timestamp: number; mediaType?: string }) {
     setFavorites(prev => {
       if (prev.some(f => f.prompt === img.prompt)) return prev;
-      return [{ id: `fav-${img.timestamp}-${Math.random().toString(36).slice(2, 8)}`, ...img }, ...prev];
+      const newFav = { id: `fav-${img.timestamp}-${Math.random().toString(36).slice(2, 8)}`, ...img };
+      // Save to Supabase in background
+      fetch('/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: img.url, prompt: img.prompt, mediaType: img.mediaType || 'image' }),
+      }).then(r => r.json()).then(data => {
+        if (data.success && data.id) {
+          // Update the id to match Supabase
+          setFavorites(p => p.map(f => f.id === newFav.id ? { ...f, id: data.id } : f));
+        }
+      }).catch(() => {});
+      return [newFav, ...prev];
     });
   }
-  function removeFavorite(id: string) { setFavorites(prev => prev.filter(f => f.id !== id)); }
-  function clearAllFavorites() { if (confirm('Supprimer tous les favoris ?')) { setFavorites([]); localStorage.removeItem('favorites'); } }
+  function removeFavorite(id: string) {
+    setFavorites(prev => prev.filter(f => f.id !== id));
+    fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).catch(() => {});
+  }
+  function clearAllFavorites() {
+    if (confirm('Supprimer tous les favoris ?')) {
+      setFavorites([]);
+      fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'all' }) }).catch(() => {});
+    }
+  }
 
   // ── Persistence ──
-  useEffect(() => { try { favorites.length > 0 ? localStorage.setItem('favorites', JSON.stringify(favorites)) : localStorage.removeItem('favorites'); } catch { console.warn('⚠️ localStorage plein (favorites)'); } }, [favorites]);
   useEffect(() => { if (Object.keys(productGroups).length > 0) { try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch (e) { console.warn('⚠️ localStorage plein (productGroups)'); } } }, [productGroups]);
   useEffect(() => { Object.keys(productGroupUrls).length > 0 ? localStorage.setItem('productGroupUrls', JSON.stringify(productGroupUrls)) : localStorage.removeItem('productGroupUrls'); }, [productGroupUrls]);
   useEffect(() => { if (brandAssets.length > 0) { try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } catch { console.warn('⚠️ localStorage plein (brandAssets)'); } } }, [brandAssets]);
@@ -107,12 +126,23 @@ export default function Home() {
     } catch (e) { console.error('Gallery load error:', e); }
   }
 
+  async function loadFavorites() {
+    try {
+      const res = await fetch('/api/favorites');
+      const data = await res.json();
+      if (data.success && data.favorites) {
+        setFavorites(data.favorites);
+      }
+    } catch (e) { console.error('Favorites load error:', e); }
+  }
+
   // ── Init ──
   useEffect(() => {
     loadStats();
-    loadGallery(); // Load from Supabase instead of localStorage
+    loadGallery();
+    loadFavorites();
     const r = (k: string, s: (v: any) => void) => { const v = localStorage.getItem(k); if (v) try { s(JSON.parse(v)); } catch { localStorage.removeItem(k); } };
-    r('productGroups', setProductGroups); r('productGroupUrls', setProductGroupUrls); r('brandAssets', setBrandAssets); r('favorites', setFavorites); r('videoPolling', setVideoPolling);
+    r('productGroups', setProductGroups); r('productGroupUrls', setProductGroupUrls); r('brandAssets', setBrandAssets); r('videoPolling', setVideoPolling);
     const b = localStorage.getItem('batchCount'); if (b) setBatchCount(parseInt(b));
   }, []);
 
@@ -238,7 +268,7 @@ export default function Home() {
       setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt('');
     }
   }
-  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','batchCount','videoPolling','favorites','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); } }
+  function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','batchCount','videoPolling','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'all' }) }).catch(() => {}); } }
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
     try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meta-ads-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
   }
