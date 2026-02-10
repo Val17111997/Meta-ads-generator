@@ -66,6 +66,8 @@ export default function Home() {
   const handlePromptsGenerated = () => { loadStats(); promptsTableRef.current?.reload(); addLog('📋 Prompts ajoutés'); };
 
   // ── Favoris ──
+  const [favToast, setFavToast] = useState(false);
+
   function addToFavorites(img: { url: string; prompt: string; timestamp: number; mediaType?: string }) {
     setFavorites(prev => {
       if (prev.some(f => f.prompt === img.prompt)) return prev;
@@ -77,10 +79,15 @@ export default function Home() {
         body: JSON.stringify({ url: img.url, prompt: img.prompt, mediaType: img.mediaType || 'image' }),
       }).then(r => r.json()).then(data => {
         if (data.success && data.id) {
-          // Update the id to match Supabase
           setFavorites(p => p.map(f => f.id === newFav.id ? { ...f, id: data.id } : f));
         }
       }).catch(() => {});
+      // Toast + scroll to favorites
+      setFavToast(true);
+      setTimeout(() => setFavToast(false), 2000);
+      setTimeout(() => {
+        document.getElementById('favorites-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
       return [newFav, ...prev];
     });
   }
@@ -508,11 +515,22 @@ export default function Home() {
                   )}
                 </div>
               </div>
-              <FavoritesPanel favorites={favorites} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} />
+              <div id="favorites-section">
+                <FavoritesPanel favorites={favorites} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} />
+              </div>
             </div>
           )}
         </div>
       </main>
+
+      {/* ═══ FAV TOAST ═══ */}
+      {favToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] animate-bounce">
+          <div className="bg-amber-500 text-white px-5 py-2.5 rounded-full shadow-lg shadow-amber-200 text-sm font-semibold flex items-center gap-2">
+            ⭐ Ajouté aux favoris ↓
+          </div>
+        </div>
+      )}
 
       {/* ═══ LOG DRAWER ═══ */}
       {showLogs && (
