@@ -205,7 +205,11 @@ export default function Home() {
     setIsGenerating(true); setError(null); addLog('🎨 Génération…');
     try {
       const max = 10;
-      const lg = Object.fromEntries(Object.entries(productGroups).map(([n,imgs]) => [n, imgs.slice(0, Math.ceil(max/Object.keys(productGroups).length))]));
+      const lg = Object.fromEntries(Object.entries(productGroups).map(([n,imgs]) => {
+        // Shuffle images randomly so all product variants get represented
+        const shuffled = [...imgs].sort(() => Math.random() - 0.5);
+        return [n, shuffled.slice(0, Math.ceil(max/Object.keys(productGroups).length))];
+      }));
       const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine: 'veo' }) });
       if (!ok) {
         const m = data?.message||data?.error||'';

@@ -535,8 +535,10 @@ export async function POST(request: Request) {
     let selectedImages: string[] = [];
     
     if (productName && productGroups[productName]) {
-      selectedImages = productGroups[productName].map((img: any) => img.url);
-      console.log(`📂 Groupe sélectionné: "${productName}" (${selectedImages.length} images)`);
+      // Shuffle to vary across product variants (different fragrances, colors, etc.)
+      const shuffled = [...productGroups[productName]].sort(() => Math.random() - 0.5);
+      selectedImages = shuffled.slice(0, 4).map((img: any) => img.url);
+      console.log(`📂 Groupe sélectionné: "${productName}" (${selectedImages.length}/${productGroups[productName].length} images, aléatoire)`);
     } else if (productName && !productGroups[productName]) {
       return NextResponse.json({ 
         success: false,
