@@ -201,13 +201,22 @@ export default function Home() {
   async function generateSingle() {
     if (isGenerating) return;
     const tot = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
-    if (tot === 0) { setError('📸 Ajoute des images produit.'); setTimeout(() => setError(null), 5000); return; }
+    if (tot === 0) { setError('📸 Aucune image produit uploadée. Va dans l\'onglet Assets, crée un groupe de produits et ajoute des photos.'); setTimeout(() => setError(null), 8000); return; }
     setIsGenerating(true); setError(null); addLog('🎨 Génération…');
     try {
       const max = 10;
       const lg = Object.fromEntries(Object.entries(productGroups).map(([n,imgs]) => [n, imgs.slice(0, Math.ceil(max/Object.keys(productGroups).length))]));
       const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine: 'veo' }) });
-      if (!ok) { const m = data?.message||data?.error||''; if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts générés !'); setAutoMode(false); } else setError('⏳ Serveur occupé…'); setTimeout(() => setError(null), 5000); return; }
+      if (!ok) {
+        const m = data?.message||data?.error||'';
+        if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts ont été générés !'); setAutoMode(false); }
+        else if (m.includes('429') || m.includes('rate') || m.includes('Rate')) { setError('⏳ Trop de requêtes — les clés API sont temporairement limitées. Réessaie dans 1-2 minutes.'); }
+        else if (m.includes('CLIENT_ID')) { setError('⚙️ CLIENT_ID non configuré. Contacte l\'administrateur.'); }
+        else if (m.includes('GOOGLE_API_KEY')) { setError('🔑 Clé Google API manquante. Ajoute GOOGLE_API_KEY dans les variables Vercel.'); }
+        else if (m) { setError(`⚠️ ${m}`); }
+        else { setError('⏳ Serveur occupé, réessaie dans quelques secondes.'); }
+        setTimeout(() => setError(null), 8000); return;
+      }
       if (data.success) {
         if (data.videoOperation && !data.imageUrl) { setVideoPolling({ operation: data.videoOperation, prompt: data.prompt, keyIndex: data.videoKeyIndex||0 }); }
         else {
@@ -220,8 +229,18 @@ export default function Home() {
           saveToGallery(data.imageUrl, data.prompt, data.mediaType || 'image');
         }
         promptsTableRef.current?.reload();
-      } else { setError('⚠️ Génération échouée'); setTimeout(() => setError(null), 5000); }
-    } catch { setError('📡 Connexion impossible'); setTimeout(() => setError(null), 5000); }
+      } else {
+        const m = data?.message||data?.error||'';
+        if (m.includes('introuvable') && m.includes('Groupe')) { setError(`📂 ${m} — Va dans Assets et uploade des photos pour ce produit.`); }
+        else if (m.includes('Aucune image')) { setError('📸 Aucune image disponible pour ce produit. Uploade des photos dans l\'onglet Assets.'); }
+        else if (m.includes('Prompt vide')) { setError('✏️ Le prompt est vide. Vérifie tes prompts dans l\'onglet Prompts.'); }
+        else if (m.includes('filtre') || m.includes('sécurité') || m.includes('bloqué')) { setError(`🚫 ${m}`); }
+        else if (m.includes('Échec') && m.includes('clés')) { setError('🔑 Toutes les clés Google sont en rate limit. Attends quelques minutes ou ajoute une clé supplémentaire.'); }
+        else if (m) { setError(`⚠️ ${m}`); }
+        else { setError('⚠️ Génération échouée — consulte les logs (📋) pour plus de détails.'); }
+        setTimeout(() => setError(null), 8000);
+      }
+    } catch { setError('📡 Connexion au serveur impossible. Vérifie ta connexion internet.'); setTimeout(() => setError(null), 8000); }
     finally { setIsGenerating(false); }
   }
 
