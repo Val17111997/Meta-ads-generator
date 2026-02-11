@@ -131,7 +131,37 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
     }
   };
 
-  if (favorites.length === 0) return null;
+  if (favorites.length === 0) return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-6">
+      <h2 className="text-2xl font-bold text-gray-300 mb-2">⭐ Favoris</h2>
+      <p className="text-sm text-gray-400">Clique sur ⭐ sous une image de la galerie pour l'ajouter à tes favoris. Tu pourras ensuite les exporter en ZIP ou générer des variantes.</p>
+    </div>
+  );
+
+  const downloadAllZip = async () => {
+    if (favorites.length === 0) return;
+    setZipping(true);
+    setStatus(`📦 Préparation du ZIP (${favorites.length} fichiers)...`);
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < favorites.length; i++) {
+        const fav = favorites[i];
+        const isVideo = fav.mediaType === 'video' || fav.url.endsWith('.mp4');
+        const ext = isVideo ? 'mp4' : 'png';
+        const fileName = `favori-${i + 1}.${ext}`;
+        if (fav.url.startsWith('data:')) {
+          zip.file(fileName, fav.url.split(',')[1], { base64: true });
+        } else {
+          try { const resp = await fetch(fav.url); zip.file(fileName, await resp.blob()); } catch {}
+        }
+        setStatus(`📦 ${i + 1}/${favorites.length} fichiers...`);
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `favoris-${favorites.length}-${Date.now()}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setStatus(`✅ ZIP téléchargé (${favorites.length} fichiers)`);
+    } catch (error: any) { setStatus(`❌ Erreur ZIP: ${error.message}`); }
+    finally { setZipping(false); setTimeout(() => setStatus(''), 4000); }
+  };
 
   const selectedCount = selectedIds.size;
 
@@ -141,6 +171,13 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
         <h2 className="text-2xl font-bold">⭐ Favoris ({favorites.length})</h2>
         <div className="flex gap-2">
           <button
+            onClick={downloadAllZip}
+            disabled={zipping}
+            className="px-4 py-2 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white text-sm rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-wait"
+          >
+            {zipping ? '⏳ ZIP...' : '📦 Télécharger tout'}
+          </button>
+          <button
             onClick={() => { setSelectMode(!selectMode); if (selectMode) setSelectedIds(new Set()); }}
             className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
               selectMode
@@ -148,9 +185,9 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
                 : 'bg-amber-500 hover:bg-amber-600 text-white'
             }`}
           >
-            {selectMode ? '✕ Annuler' : '☑️ Sélectionner'}
+            {selectMode ? '✕ Annuler' : '✨ Variantes'}
           </button>
-          <button onClick={onClearAll} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg font-semibold">
+          <button onClick={onClearAll} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-500 text-sm rounded-lg font-semibold border border-red-200">
             🗑️
           </button>
         </div>
@@ -159,7 +196,7 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
       {selectMode && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
           <p className="text-sm text-amber-800 mb-3 font-medium">
-            Sélectionne les contenus qui te plaisent. Claude va générer des variantes inspirées de ces prompts.
+            Sélectionne les créas qui te plaisent pour générer des variantes inspirées de ces prompts.
           </p>
           <div className="flex items-center gap-3 flex-wrap">
             <button
@@ -204,14 +241,9 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
                 <button
                   onClick={downloadSelectedZip}
                   disabled={zipping}
-                  className="px-4 py-1.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg text-sm font-bold hover:shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-wait"
+                  className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
                 >
-                  {zipping ? (
-                    <span className="flex items-center gap-2">
-                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
-                      ZIP...
-                    </span>
-                  ) : `📦 ZIP (${selectedCount})`}
+                  {zipping ? '⏳...' : `📦 ZIP (${selectedCount})`}
                 </button>
                 <button
                   onClick={generateVariants}
