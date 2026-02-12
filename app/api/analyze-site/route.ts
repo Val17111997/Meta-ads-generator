@@ -145,12 +145,12 @@ Réponds UNIQUEMENT avec le JSON, sans texte avant ou après.`;
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Erreur Claude API:', errorText);
-    throw new Error('Claude API error: ' + response.status);
+    throw new Error('Erreur API analyse: ' + response.status);
   }
 
   const data = await response.json();
   const content = data.content[0]?.text;
-  if (!content) throw new Error('Réponse Claude vide');
+  if (!content) throw new Error('Réponse analyse vide');
 
   console.log('✅ Analyse reçue');
 
@@ -264,12 +264,12 @@ Génère EXACTEMENT ${promptCount} prompts variés.`;
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Erreur Claude API:', errorText);
-    throw new Error('Claude API error: ' + response.status);
+    throw new Error('Erreur API analyse: ' + response.status);
   }
 
   const data = await response.json();
   const content = data.content[0]?.text;
-  if (!content) throw new Error('Réponse Claude vide');
+  if (!content) throw new Error('Réponse analyse vide');
 
   console.log('✅ Prompts reçus');
 
@@ -357,12 +357,12 @@ Génère EXACTEMENT ${promptCount} variantes.`;
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Erreur Claude API:', errorText);
-    throw new Error('Claude API error: ' + response.status);
+    throw new Error('Erreur API analyse: ' + response.status);
   }
 
   const data = await response.json();
   const content = data.content[0]?.text;
-  if (!content) throw new Error('Réponse Claude vide');
+  if (!content) throw new Error('Réponse analyse vide');
 
   console.log('✅ Variantes reçues');
 

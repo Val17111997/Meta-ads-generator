@@ -261,7 +261,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
     setStatus('🌐 Connexion au site...');
     try {
       setTimeout(() => setStatus('📥 Récupération du contenu...'), 2000);
-      setTimeout(() => setStatus('🧠 Claude analyse la marque...'), 5000);
+      setTimeout(() => setStatus('🧠 Analyse de la marque en cours...'), 5000);
       const response = await fetch('/api/analyze-site', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim(), action: 'analyze' }),
@@ -296,7 +296,7 @@ export default function SiteAnalyzer({ onPromptsGenerated, productGroups = [], o
     const productLabel = selectedProduct ? ` pour "${selectedProduct}"` : '';
     setStatus(`✍️ Génération de ${promptCount} prompts ${typeLabel}${productLabel}...`);
     try {
-      setTimeout(() => setStatus(`🧠 Claude crée les prompts ${typeLabel}${productLabel}...`), 3000);
+      setTimeout(() => setStatus(`🧠 Création des prompts ${typeLabel}${productLabel}...`), 3000);
       setTimeout(() => setStatus('💾 Ajout à la base de données...'), 15000);
 
       // Find product URL if available

@@ -44,7 +44,7 @@ export default function Home() {
   const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string; fileName?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
   const [videoPolling, setVideoPolling] = useState<{ operation: string; prompt: string; keyIndex?: number } | null>(null);
-  const [includeText, setIncludeText] = useState(true);
+  const [includeText, setIncludeText] = useState(false);
   const [includeLogo, setIncludeLogo] = useState(false);
 
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
@@ -159,7 +159,7 @@ export default function Home() {
   useEffect(() => {
     if (!videoPolling) return;
     localStorage.setItem('videoPolling', JSON.stringify(videoPolling));
-    addLog('🎬 Vidéo Veo en cours…');
+    addLog('🎬 Vidéo en cours de génération…');
     let stop = false, retries = 0;
     const poll = async () => {
       if (stop) return;
@@ -169,10 +169,10 @@ export default function Home() {
         const m = data.error || '';
         if (['bloqué','sécurité','expirée','introuvable','safety','filtered'].some(k => m.includes(k))) { addLog(`❌ ${m}`); setVideoPolling(null); localStorage.removeItem('videoPolling'); return; }
         if (++retries < 30) { setTimeout(poll, 15000); return; }
-        addLog('⚠️ Vidéo Veo timeout'); setVideoPolling(null); localStorage.removeItem('videoPolling'); return;
+        addLog('⚠️ Vidéo timeout'); setVideoPolling(null); localStorage.removeItem('videoPolling'); return;
       }
       if (data.success && data.done && data.videoUri) {
-        addLog('✅ Vidéo Veo prête !'); setCurrentImage(data.videoUri); setCurrentPrompt(videoPolling.prompt);
+        addLog('✅ Vidéo prête !'); setCurrentImage(data.videoUri); setCurrentPrompt(videoPolling.prompt);
         const ni = { url: data.videoUri, prompt: videoPolling.prompt, timestamp: Date.now(), mediaType: 'video' };
         setGeneratedImages(prev => [ni, ...prev]);
         setStats(prev => ({ ...prev, generated: prev.generated+1, remaining: prev.remaining-1 }));
@@ -216,7 +216,7 @@ export default function Home() {
         if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts ont été générés !'); setAutoMode(false); }
         else if (m.includes('429') || m.includes('rate') || m.includes('Rate')) { setError('⏳ Trop de requêtes — les clés API sont temporairement limitées. Réessaie dans 1-2 minutes.'); }
         else if (m.includes('CLIENT_ID')) { setError('⚙️ CLIENT_ID non configuré. Contacte l\'administrateur.'); }
-        else if (m.includes('GOOGLE_API_KEY')) { setError('🔑 Clé Google API manquante. Ajoute GOOGLE_API_KEY dans les variables Vercel.'); }
+        else if (m.includes('GOOGLE_API_KEY')) { setError('🔑 Clé API de génération manquante. Contacte l\'administrateur.'); }
         else if (m) { setError(`⚠️ ${m}`); }
         else { setError('⏳ Serveur occupé, réessaie dans quelques secondes.'); }
         setTimeout(() => setError(null), 8000); return;
@@ -239,7 +239,7 @@ export default function Home() {
         else if (m.includes('Aucune image')) { setError('📸 Aucune image disponible pour ce produit. Uploade des photos dans l\'onglet Assets.'); }
         else if (m.includes('Prompt vide')) { setError('✏️ Le prompt est vide. Vérifie tes prompts dans l\'onglet Prompts.'); }
         else if (m.includes('filtre') || m.includes('sécurité') || m.includes('bloqué')) { setError(`🚫 ${m}`); }
-        else if (m.includes('Échec') && m.includes('clés')) { setError('🔑 Toutes les clés Google sont en rate limit. Attends quelques minutes ou ajoute une clé supplémentaire.'); }
+        else if (m.includes('Échec') && m.includes('clés')) { setError('🔑 Les clés API sont temporairement limitées. Attends quelques minutes ou contacte l\'administrateur.'); }
         else if (m) { setError(`⚠️ ${m}`); }
         else { setError('⚠️ Génération échouée — consulte les logs (📋) pour plus de détails.'); }
         setTimeout(() => setError(null), 8000);
@@ -302,7 +302,7 @@ export default function Home() {
   }
   function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','batchCount','videoPolling','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'all' }) }).catch(() => {}); } }
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
-    try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`meta-ads-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
+    try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`content-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
   }
 
   const totalAssets = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
@@ -322,7 +322,7 @@ export default function Home() {
                 <defs><linearGradient id="palGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#8b5cf6"/><stop offset="50%" stopColor="#6366f1"/><stop offset="100%" stopColor="#a855f7"/></linearGradient></defs>
                 <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c1.38 0 2.5-1.12 2.5-2.5 0-.61-.23-1.2-.64-1.67-.08-.1-.13-.21-.13-.33 0-.28.22-.5.5-.5H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zM5.5 12c-.83 0-1.5-.67-1.5-1.5S4.67 9 5.5 9 7 9.67 7 10.5 6.33 12 5.5 12zm3-4C7.67 8 7 7.33 7 6.5S7.67 5 8.5 5s1.5.67 1.5 1.5S9.33 8 8.5 8zm7 0c-.83 0-1.5-.67-1.5-1.5S14.67 5 15.5 5s1.5.67 1.5 1.5S16.33 8 15.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S17.67 9 18.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" fill="url(#palGrad)"/>
               </svg>
-              <span className="text-xl font-bold bg-gradient-to-r from-violet-600 via-blue-600 to-pink-600 bg-clip-text text-transparent">Meta Ads Generator</span>
+              <span className="text-xl font-bold bg-gradient-to-r from-violet-600 via-blue-600 to-pink-600 bg-clip-text text-transparent">Content Studio</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>{stats.generated} générés</div>
@@ -382,7 +382,7 @@ export default function Home() {
             <div className="mt-2 space-y-1">
               {error && <div className={`px-4 py-2 rounded-lg text-xs font-medium ${error.includes('✅') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : error.includes('⏳') ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>{error}</div>}
               {autoMode && !error && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Mode auto actif — génération continue</div>}
-              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>Vidéo Veo en cours de création…</div>}
+              {videoPolling && <div className="px-4 py-2 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>Vidéo en cours de création…</div>}
             </div>
           )}
         </div>

@@ -160,7 +160,7 @@ async function generateVideoWithVeo(
             const raiReasons = updatedOp.response?.generateVideoResponse?.raiMediaFilteredReasons;
             if (raiReasons && raiReasons.length > 0) {
               console.error('🚫 Veo: prompt bloqué par filtre sécurité:', raiReasons[0]);
-              throw new Error(`Veo: prompt bloqué par le filtre de sécurité Google. Modifie le prompt et réessaie.`);
+              throw new Error(`Prompt bloqué par le filtre de sécurité. Modifie le prompt et réessaie.`);
             }
             console.warn('⚠️ Veo done mais structure réponse inattendue:', JSON.stringify(updatedOp.response || updatedOp).substring(0, 500));
             continue;
@@ -661,12 +661,12 @@ export async function POST(request: Request) {
         if (videoError.message?.includes('bloqué par le filtre')) {
           await getSupabase()
             .from('prompts')
-            .update({ status: 'error', image_url: 'Bloqué par filtre sécurité Google' })
+            .update({ status: 'error', image_url: 'Bloqué par filtre sécurité' })
             .eq('id', promptRow.id);
 
           return NextResponse.json({
             success: false,
-            error: '🚫 Ce prompt a été bloqué par le filtre de sécurité Google. Il a été marqué en erreur, relance pour passer au suivant.',
+            error: '🚫 Ce prompt a été bloqué par le filtre de sécurité. Il a été marqué en erreur, relance pour passer au suivant.',
             remaining: remainingCount,
           });
         }
