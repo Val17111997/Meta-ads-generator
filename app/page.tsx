@@ -50,6 +50,7 @@ export default function Home() {
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const [productGroupUrls, setProductGroupUrls] = useState<{ [name: string]: string }>({});
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
   const [galleryPage, setGalleryPage] = useState(1);
   const GALLERY_PER_PAGE = 20;
 
@@ -143,6 +144,7 @@ export default function Home() {
         setFavorites(data.favorites);
       }
     } catch (e) { console.error('Favorites load error:', e); }
+    finally { setFavoritesLoaded(true); }
   }
 
   // ── Init ──
@@ -578,7 +580,9 @@ export default function Home() {
                 </div>
               </div>
               <div id="favorites-section">
-                <FavoritesPanel favorites={favorites} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} />
+                <FavoritesPanel favorites={favorites} loading={!favoritesLoaded} onRemove={removeFavorite} onClearAll={clearAllFavorites} onVariantsGenerated={handlePromptsGenerated} onSaveEdited={(dataUrl, prompt) => {
+                  addToFavorites({ url: dataUrl, prompt: prompt + ' (édité)', timestamp: Date.now(), mediaType: 'image' });
+                }} />
               </div>
             </div>
           )}

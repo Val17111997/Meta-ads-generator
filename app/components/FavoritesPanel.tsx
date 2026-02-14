@@ -14,12 +14,14 @@ export interface FavoriteItem {
 
 interface FavoritesPanelProps {
   favorites: FavoriteItem[];
+  loading?: boolean;
   onRemove: (id: string) => void;
   onClearAll: () => void;
   onVariantsGenerated?: () => void;
+  onSaveEdited?: (dataUrl: string, originalPrompt: string) => void;
 }
 
-export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVariantsGenerated }: FavoritesPanelProps) {
+export default function FavoritesPanel({ favorites, loading, onRemove, onClearAll, onVariantsGenerated, onSaveEdited }: FavoritesPanelProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -155,6 +157,17 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
       setTimeout(() => setStatus(''), 5000);
     }
   };
+
+  if (loading) return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-6">
+      <h2 className="text-2xl font-bold text-gray-300 mb-3">⭐ Favoris</h2>
+      <div className="grid grid-cols-5 gap-4">
+        {[1,2,3,4,5].map(i => (
+          <div key={i} className="aspect-square rounded-lg bg-gray-100 animate-pulse" />
+        ))}
+      </div>
+    </div>
+  );
 
   if (favorites.length === 0) return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-6">
@@ -342,6 +355,12 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
         <ImageEditor
           imageUrl={editingFav.url}
           onClose={() => setEditingFav(null)}
+          onSave={(dataUrl) => {
+            if (onSaveEdited) {
+              onSaveEdited(dataUrl, editingFav.prompt);
+            }
+            setEditingFav(null);
+          }}
         />
       )}
     </div>

@@ -169,22 +169,36 @@ export default function ImageEditor({ imageUrl, onClose, onSave }: ImageEditorPr
     }
   };
 
-  const exportImage = () => {
+  const [saving, setSaving] = useState(false);
+
+  const getCanvasDataUrl = () => {
     const canvas = fabricRef.current;
-    if (!canvas) return;
+    if (!canvas) return null;
     canvas.discardActiveObject();
     canvas.renderAll();
-    const dataUrl = canvas.toDataURL({ format: 'png', quality: 1, multiplier: 2 });
-    
-    // Download
+    return canvas.toDataURL({ format: 'png', quality: 1, multiplier: 2 });
+  };
+
+  const exportImage = () => {
+    const dataUrl = getCanvasDataUrl();
+    if (!dataUrl) return;
     const a = document.createElement('a');
     a.href = dataUrl;
     a.download = `content-edited-${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
 
-    if (onSave) onSave(dataUrl);
+  const saveToFavorites = async () => {
+    const dataUrl = getCanvasDataUrl();
+    if (!dataUrl || !onSave) return;
+    setSaving(true);
+    try {
+      onSave(dataUrl);
+    } finally {
+      setTimeout(() => { setSaving(false); onClose(); }, 500);
+    }
   };
 
   return (
@@ -195,6 +209,11 @@ export default function ImageEditor({ imageUrl, onClose, onSave }: ImageEditorPr
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-bold text-gray-800">✏️ Éditeur de texte</h2>
           <div className="flex items-center gap-3">
+            {onSave && (
+              <button onClick={saveToFavorites} disabled={saving} className="px-5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg text-sm font-bold hover:shadow-lg transition-all disabled:opacity-50">
+                {saving ? '⏳ Sauvegarde...' : '⭐ Sauvegarder en favori'}
+              </button>
+            )}
             <button onClick={exportImage} className="px-5 py-2 bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg text-sm font-bold hover:shadow-lg transition-all">
               📥 Exporter PNG
             </button>
