@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import JSZip from 'jszip';
+import ImageEditor from './ImageEditor';
 
 export interface FavoriteItem {
   id: string;
@@ -26,6 +27,7 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
   const [status, setStatus] = useState('');
   const [variantCount, setVariantCount] = useState(10);
   const [contentType, setContentType] = useState<'photo' | 'video' | 'both'>('both');
+  const [editingFav, setEditingFav] = useState<FavoriteItem | null>(null);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -60,11 +62,9 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
         const fileName = `favori-${i + 1}.${ext}`;
 
         if (fav.url.startsWith('data:')) {
-          // Base64 data URL
           const base64 = fav.url.split(',')[1];
           zip.file(fileName, base64, { base64: true });
         } else {
-          // Remote URL (Supabase Storage) — fetch the binary
           try {
             const resp = await fetch(fav.url);
             const blob = await resp.blob();
@@ -92,6 +92,31 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
       setZipping(false);
       setTimeout(() => setStatus(''), 4000);
     }
+  };
+
+  const downloadAllZip = async () => {
+    if (favorites.length === 0) return;
+    setZipping(true);
+    setStatus(`📦 Préparation du ZIP (${favorites.length} fichiers)...`);
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < favorites.length; i++) {
+        const fav = favorites[i];
+        const isVideo = fav.mediaType === 'video' || fav.url.endsWith('.mp4');
+        const ext = isVideo ? 'mp4' : 'png';
+        const fileName = `favori-${i + 1}.${ext}`;
+        if (fav.url.startsWith('data:')) {
+          zip.file(fileName, fav.url.split(',')[1], { base64: true });
+        } else {
+          try { const resp = await fetch(fav.url); zip.file(fileName, await resp.blob()); } catch {}
+        }
+        setStatus(`📦 ${i + 1}/${favorites.length} fichiers...`);
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `favoris-${favorites.length}-${Date.now()}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setStatus(`✅ ZIP téléchargé (${favorites.length} fichiers)`);
+    } catch (error: any) { setStatus(`❌ Erreur ZIP: ${error.message}`); }
+    finally { setZipping(false); setTimeout(() => setStatus(''), 4000); }
   };
 
   const generateVariants = async () => {
@@ -137,31 +162,6 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
       <p className="text-sm text-gray-400">Clique sur ⭐ sous une image de la galerie pour l'ajouter à tes favoris. Tu pourras ensuite les exporter en ZIP ou générer des variantes.</p>
     </div>
   );
-
-  const downloadAllZip = async () => {
-    if (favorites.length === 0) return;
-    setZipping(true);
-    setStatus(`📦 Préparation du ZIP (${favorites.length} fichiers)...`);
-    try {
-      const zip = new JSZip();
-      for (let i = 0; i < favorites.length; i++) {
-        const fav = favorites[i];
-        const isVideo = fav.mediaType === 'video' || fav.url.endsWith('.mp4');
-        const ext = isVideo ? 'mp4' : 'png';
-        const fileName = `favori-${i + 1}.${ext}`;
-        if (fav.url.startsWith('data:')) {
-          zip.file(fileName, fav.url.split(',')[1], { base64: true });
-        } else {
-          try { const resp = await fetch(fav.url); zip.file(fileName, await resp.blob()); } catch {}
-        }
-        setStatus(`📦 ${i + 1}/${favorites.length} fichiers...`);
-      }
-      const blob = await zip.generateAsync({ type: 'blob' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `favoris-${favorites.length}-${Date.now()}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setStatus(`✅ ZIP téléchargé (${favorites.length} fichiers)`);
-    } catch (error: any) { setStatus(`❌ Erreur ZIP: ${error.message}`); }
-    finally { setZipping(false); setTimeout(() => setStatus(''), 4000); }
-  };
 
   const selectedCount = selectedIds.size;
 
@@ -307,12 +307,22 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
                   </div>
                 )}
                 {!selectMode && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onRemove(fav.id); }}
-                    className="absolute top-1 right-1 bg-black bg-opacity-50 hover:bg-opacity-80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    ✕
-                  </button>
+                  <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {fav.mediaType !== 'video' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditingFav(fav); }}
+                        className="bg-violet-500 hover:bg-violet-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                      >
+                        ✏️
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onRemove(fav.id); }}
+                      className="bg-black bg-opacity-50 hover:bg-opacity-80 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="p-2 bg-white">
@@ -324,8 +334,16 @@ export default function FavoritesPanel({ favorites, onRemove, onClearAll, onVari
       </div>
 
       <p className="text-xs text-gray-400 mt-3">
-        💡 Clique ⭐ dans la galerie pour ajouter des favoris. Ils sont conservés même après le vidage de la galerie.
+        💡 Clique ⭐ dans la galerie pour ajouter des favoris. Survole une image et clique ✏️ pour ajouter du texte.
       </p>
+
+      {/* Image Editor Overlay */}
+      {editingFav && (
+        <ImageEditor
+          imageUrl={editingFav.url}
+          onClose={() => setEditingFav(null)}
+        />
+      )}
     </div>
   );
 }
