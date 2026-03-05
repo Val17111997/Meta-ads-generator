@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 function getSupabase() {
@@ -327,7 +327,7 @@ Professional marketing photography. High quality. Eye-catching for social media.
         }
       );
 
-      if (response.status === 503 || response.status === 429) {
+      if (response.status === 503 || response.status === 429 || response.status === 500) {
         console.log(`⚠️ Image: ${response.status} sur clé #${keyIndex + 1}, passage à la suivante...`);
         await new Promise(resolve => setTimeout(resolve, 2000));
         continue;
