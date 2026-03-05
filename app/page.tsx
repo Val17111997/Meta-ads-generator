@@ -206,13 +206,13 @@ export default function Home() {
     if (tot === 0) { setError('📸 Aucune image produit uploadée. Va dans l\'onglet Assets, crée un groupe de produits et ajoute des photos.'); setTimeout(() => setError(null), 8000); return; }
     setIsGenerating(true); setError(null); addLog('🎨 Génération…');
     try {
-      const max = 10;
+      const max = 4;
       const lg = Object.fromEntries(Object.entries(productGroups).map(([n,imgs]) => {
         // Shuffle images randomly so all product variants get represented
         const shuffled = [...imgs].sort(() => Math.random() - 0.5);
         return [n, shuffled.slice(0, Math.ceil(max/Object.keys(productGroups).length))];
       }));
-      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine: 'veo' }) });
+      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.filter(a => includeLogo ? true : a.type !== 'logo').slice(0, 3).map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine: 'veo' }) });
       if (!ok) {
         const m = data?.message||data?.error||'';
         if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts ont été générés !'); setAutoMode(false); }
@@ -280,14 +280,14 @@ export default function Home() {
   // ── Brand ──
   function handleBrandAssetUpload(e: React.ChangeEvent<HTMLInputElement>, type: 'logo'|'palette'|'style') {
     if (!e.target.files?.length) return;
-    Array.from(e.target.files).forEach(f => { const r = new FileReader(); r.onload = ev => { try { setBrandAssets(prev => [...prev, { name: f.name, url: ev.target?.result as string, type }]); } catch (err) { console.error('Erreur brand asset:', f.name, err); } }; r.onerror = () => console.error('Erreur lecture brand asset:', f.name); r.readAsDataURL(f); });
+    Array.from(e.target.files).forEach(f => { const r = new FileReader(); r.onload = async ev => { try { const compressed = await compressImage(ev.target?.result as string); setBrandAssets(prev => [...prev, { name: f.name, url: compressed, type }]); } catch (err) { console.error('Erreur brand asset:', f.name, err); } }; r.onerror = () => console.error('Erreur lecture brand asset:', f.name); r.readAsDataURL(f); });
   }
   function deleteBrandAsset(n: string) { setBrandAssets(prev => prev.filter(a => a.name !== n)); }
   function clearBrandAssets() { if (confirm('Supprimer ?')) { setBrandAssets([]); localStorage.removeItem('brandAssets'); } }
 
   // ── Utils ──
   async function compressImage(b64: string): Promise<string> {
-    return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d')!; let w = img.width, h = img.height; const m = 600; if (w>h&&w>m) { h=(h*m)/w; w=m; } else if (h>m) { w=(w*m)/h; h=m; } c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',0.5)); }; img.onerror = () => res(b64); img.src = b64; });
+    return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d')!; let w = img.width, h = img.height; const m = 400; if (w>h&&w>m) { h=(h*m)/w; w=m; } else if (h>m) { w=(w*m)/h; h=m; } c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',0.4)); }; img.onerror = () => res(b64); img.src = b64; });
   }
   async function downloadSingle(url: string, ts: number) {
     try {
