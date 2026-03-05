@@ -1,180 +1,148 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const BUCKET = 'gallery';
+export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
+
+function getClientId() {
+  const id = process.env.CLIENT_ID;
+  if (!id) throw new Error('CLIENT_ID non configuré');
+  return id;
+}
 
 function getSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_KEY!,
-    { global: { fetch: (url: any, options: any = {}) => fetch(url, { ...options, cache: 'no-store' }) } }
+    {
+      global: {
+        fetch: (url, options = {}) => fetch(url, { ...options, cache: 'no-store' })
+      }
+    }
   );
 }
 
-function getClientId() {
-  return process.env.CLIENT_ID || 'default';
-}
-
-// Ensure bucket exists
-async function ensureBucket() {
-  const supabase = getSupabase();
-  const { data } = await supabase.storage.getBucket(BUCKET);
-  if (!data) {
-    await supabase.storage.createBucket(BUCKET, { public: true });
-    console.log('✅ Bucket "gallery" créé');
-  }
-}
-
-// ── GET: List all gallery images for this client ──
+// ── GET: Load gallery ──
 export async function GET() {
   try {
     const clientId = getClientId();
     const supabase = getSupabase();
-    await ensureBucket();
 
-    const { data: files, error } = await supabase.storage
-      .from(BUCKET)
-      .list(clientId, { limit: 500, sortBy: { column: 'created_at', order: 'desc' } });
+    const { data, error } = await supabase
+      .from('gallery')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('❌ Gallery list error:', error);
+      if (error.message?.includes('does not exist')) {
+        return NextResponse.json({ success: true, images: [] });
+      }
       return NextResponse.json({ success: false, error: error.message });
     }
 
-    const baseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${BUCKET}`;
-
-    const images = (files || [])
-      .filter(f => !f.name.startsWith('.'))
-      .map(f => {
-        // filename format: {timestamp}_{mediaType}.{ext} or {timestamp}_{mediaType}__{promptSlug}.{ext}
-        const nameParts = f.name.replace(/\.[^.]+$/, ''); // remove extension
-        const parts = nameParts.split('_');
-        const timestamp = parseInt(parts[0]) || Date.now();
-        const mediaType = parts[1] || 'image';
-        // Extract prompt from metadata if stored, otherwise from filename
-        const promptSlug = parts.slice(2).join('_').replace(/__/g, ' ') || '';
-
-        return {
-          url: `${baseUrl}/${clientId}/${f.name}`,
-          prompt: promptSlug,
-          timestamp,
-          mediaType,
-          fileName: f.name,
-        };
-      });
+    const images = (data || []).map(row => ({
+      url: row.url,
+      prompt: row.prompt || '',
+      mediaType: row.media_type || 'image',
+      timestamp: new Date(row.created_at).getTime(),
+      fileName: row.file_name || null,
+    }));
 
     return NextResponse.json({ success: true, images });
   } catch (error: any) {
-    console.error('❌ Gallery GET error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// ── POST: Upload a generated image/video to gallery ──
+// ── POST: Save gallery item (now receives URL, not base64) ──
 export async function POST(req: Request) {
   try {
-    const { dataUrl, prompt, mediaType = 'image' } = await req.json();
-
-    if (!dataUrl) {
-      return NextResponse.json({ success: false, error: 'dataUrl requis' }, { status: 400 });
-    }
-
     const clientId = getClientId();
     const supabase = getSupabase();
-    await ensureBucket();
+    const body = await req.json();
+    
+    // Support both old format (dataUrl) and new format (url)
+    const imageUrl = body.url || body.dataUrl;
+    const { prompt, mediaType = 'image' } = body;
 
-    const timestamp = Date.now();
-    // Clean prompt for filename (keep first 60 chars, alphanumeric + spaces)
-    const promptSlug = (prompt || '')
-      .substring(0, 60)
-      .replace(/[^a-zA-Z0-9àâäéèêëïîôùûüÿçÀÂÄÉÈÊËÏÎÔÙÛÜŸÇ\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '__');
-
-    // Detect format from data URL
-    let ext = 'png';
-    let contentType = 'image/png';
-    let buffer: Buffer;
-
-    if (dataUrl.startsWith('data:')) {
-      const mimeMatch = dataUrl.match(/^data:([^;]+);base64,/);
-      if (mimeMatch) {
-        contentType = mimeMatch[1];
-        if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = 'jpg';
-        else if (contentType.includes('video')) { ext = 'mp4'; contentType = 'video/mp4'; }
-        else if (contentType.includes('webp')) ext = 'webp';
-      }
-      const base64 = dataUrl.split(',')[1];
-      buffer = Buffer.from(base64, 'base64');
-    } else if (dataUrl.startsWith('http')) {
-      // URL — fetch and upload
-      const resp = await fetch(dataUrl);
-      const arrayBuf = await resp.arrayBuffer();
-      buffer = Buffer.from(arrayBuf);
-      contentType = resp.headers.get('content-type') || 'image/png';
-      if (contentType.includes('jpeg')) ext = 'jpg';
-      else if (contentType.includes('video')) { ext = 'mp4'; contentType = 'video/mp4'; }
-      else if (contentType.includes('webp')) ext = 'webp';
-    } else {
-      return NextResponse.json({ success: false, error: 'Format dataUrl non supporté' }, { status: 400 });
+    if (!imageUrl) {
+      return NextResponse.json({ success: false, error: 'URL manquante' }, { status: 400 });
     }
 
-    const fileName = `${timestamp}_${mediaType}${promptSlug ? `_${promptSlug}` : ''}.${ext}`;
-    const filePath = `${clientId}/${fileName}`;
+    // If it's a base64 dataUrl (legacy/edited images), upload to storage first
+    let finalUrl = imageUrl;
+    let fileName = null;
 
-    const { error: uploadError } = await supabase.storage
-      .from(BUCKET)
-      .upload(filePath, buffer, {
-        contentType,
-        upsert: false,
+    if (imageUrl.startsWith('data:')) {
+      const isVideo = mediaType === 'video' || imageUrl.startsWith('data:video');
+      const ext = isVideo ? 'mp4' : 'png';
+      const mimeType = isVideo ? 'video/mp4' : 'image/png';
+      fileName = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+      const base64Raw = imageUrl.split(',')[1];
+      const buffer = Buffer.from(base64Raw, 'base64');
+
+      const { error: uploadError } = await supabase.storage
+        .from('gallery')
+        .upload(fileName, buffer, {
+          contentType: mimeType,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error('⚠️ Gallery upload error:', uploadError.message);
+        return NextResponse.json({ success: false, error: uploadError.message }, { status: 500 });
+      }
+
+      const { data: publicData } = supabase.storage.from('gallery').getPublicUrl(fileName);
+      finalUrl = publicData.publicUrl;
+    } else {
+      // Extract fileName from URL if it's a Supabase storage URL
+      const match = imageUrl.match(/\/gallery\/(.+)$/);
+      if (match) fileName = match[1];
+    }
+
+    // Save metadata to gallery table
+    const { error: insertError } = await supabase
+      .from('gallery')
+      .insert({
+        client_id: clientId,
+        url: finalUrl,
+        prompt: prompt || '',
+        media_type: mediaType,
+        file_name: fileName,
       });
 
-    if (uploadError) {
-      console.error('❌ Upload error:', uploadError);
-      return NextResponse.json({ success: false, error: uploadError.message });
+    if (insertError) {
+      console.error('⚠️ Gallery insert error:', insertError.message);
+      return NextResponse.json({ success: false, error: insertError.message }, { status: 500 });
     }
 
-    const publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${filePath}`;
-
-    console.log(`✅ Média sauvegardé: ${filePath} (${(buffer.length / 1024).toFixed(0)}KB)`);
-
-    return NextResponse.json({
-      success: true,
-      url: publicUrl,
-      fileName,
-      mediaType,
-    });
+    return NextResponse.json({ success: true, url: finalUrl });
   } catch (error: any) {
-    console.error('❌ Gallery POST error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-// ── DELETE: Remove an image from gallery ──
+// ── DELETE: Remove gallery item ──
 export async function DELETE(req: Request) {
   try {
-    const { fileName } = await req.json();
-    if (!fileName) {
-      return NextResponse.json({ success: false, error: 'fileName requis' }, { status: 400 });
-    }
-
     const clientId = getClientId();
     const supabase = getSupabase();
-    const filePath = `${clientId}/${fileName}`;
+    const { fileName } = await req.json();
 
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .remove([filePath]);
-
-    if (error) {
-      console.error('❌ Delete error:', error);
-      return NextResponse.json({ success: false, error: error.message });
+    if (fileName) {
+      await supabase.storage.from('gallery').remove([fileName]);
+      await supabase
+        .from('gallery')
+        .delete()
+        .eq('client_id', clientId)
+        .eq('file_name', fileName);
     }
 
-    console.log(`🗑️ Média supprimé: ${filePath}`);
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('❌ Gallery DELETE error:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

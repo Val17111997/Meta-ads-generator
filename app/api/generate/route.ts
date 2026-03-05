@@ -16,6 +16,40 @@ function getSupabase() {
   );
 }
 
+// ── Upload base64 image/video to Supabase Storage, return public URL ──
+async function uploadToStorage(
+  base64DataUrl: string,
+  clientId: string,
+  mediaType: string = 'image'
+): Promise<string> {
+  const supabase = getSupabase();
+  const isVideo = mediaType === 'video' || base64DataUrl.startsWith('data:video');
+  const ext = isVideo ? 'mp4' : 'png';
+  const mimeType = isVideo ? 'video/mp4' : 'image/png';
+  const fileName = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+  // Extract raw base64 data
+  const base64Raw = base64DataUrl.includes(',') ? base64DataUrl.split(',')[1] : base64DataUrl;
+  const buffer = Buffer.from(base64Raw, 'base64');
+
+  const { error } = await supabase.storage
+    .from('gallery')
+    .upload(fileName, buffer, {
+      contentType: mimeType,
+      upsert: false,
+    });
+
+  if (error) {
+    console.error('⚠️ Storage upload error:', error.message);
+    // Fallback: return base64 if upload fails
+    return base64DataUrl;
+  }
+
+  const { data: publicData } = supabase.storage.from('gallery').getPublicUrl(fileName);
+  console.log(`📦 Uploaded to storage: ${fileName}`);
+  return publicData.publicUrl;
+}
+
 // ============================================================
 // GÉNÉRATION VIDÉO avec Veo — predictLongRunning + polling
 // ============================================================
@@ -705,7 +739,7 @@ export async function POST(request: Request) {
     // ============================================================
     // IMAGE
     // ============================================================
-    const mediaUrl = await generateWithProductImage(
+    const mediaBase64 = await generateWithProductImage(
       prompt, 
       selectedImages, 
       brandAssets, 
@@ -713,16 +747,19 @@ export async function POST(request: Request) {
       includeText,
       format
     );
+
+    // Upload to Supabase Storage instead of returning base64
+    const mediaUrl = await uploadToStorage(mediaBase64, clientId, 'image');
     
     await getSupabase()
       .from('prompts')
       .update({ 
         status: 'generated',
-        image_url: 'Téléchargée localement'
+        image_url: mediaUrl
       })
       .eq('id', promptRow.id);
     
-    console.log('✅ Image générée');
+    console.log('✅ Image générée et uploadée');
     
     return NextResponse.json({ 
       success: true, 

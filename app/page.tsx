@@ -109,17 +109,17 @@ export default function Home() {
   useEffect(() => { if (Object.keys(productGroups).length > 0) { try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch (e) { console.warn('⚠️ localStorage plein (productGroups)'); } } }, [productGroups]);
   useEffect(() => { Object.keys(productGroupUrls).length > 0 ? localStorage.setItem('productGroupUrls', JSON.stringify(productGroupUrls)) : localStorage.removeItem('productGroupUrls'); }, [productGroupUrls]);
   useEffect(() => { if (brandAssets.length > 0) { try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } catch { console.warn('⚠️ localStorage plein (brandAssets)'); } } }, [brandAssets]);
-  // ── Gallery: save to Supabase (no more localStorage for images) ──
-  async function saveToGallery(dataUrl: string, prompt: string, mediaType: string = 'image') {
+  // ── Gallery: save metadata to Supabase (image already in Storage via route.ts) ──
+  async function saveToGallery(imageUrl: string, prompt: string, mediaType: string = 'image') {
     try {
       const res = await fetch('/api/gallery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dataUrl, prompt, mediaType }),
+        body: JSON.stringify({ url: imageUrl, prompt, mediaType }),
       });
       const data = await res.json();
       if (data.success) {
-        return data.url; // Public URL from Supabase Storage
+        return data.url;
       }
       console.warn('⚠️ Gallery save failed:', data.error);
       return null;
@@ -621,8 +621,7 @@ export default function Home() {
             <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Nom du groupe…" className="w-full px-4 py-2.5 border border-gray-300 rounded-lg mb-4 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 text-sm" onKeyDown={e => e.key==='Enter' && createNewGroup()} autoFocus />
             <div className="flex gap-2">
               <button onClick={createNewGroup} className="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-semibold">Créer</button>
-              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium">Annuler</button>
-            </div>
+              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium">Annuler</button>            </div>
           </div>
         </div>
       )}
