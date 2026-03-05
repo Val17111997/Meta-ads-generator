@@ -55,12 +55,13 @@ const CREATIVE_CONCEPTS = [
 
 // ── Étape 1 : Fetch le contenu du site ──
 async function fetchWebsite(url: string): Promise<string> {
+  let normalizedUrl = url;
+  if (!normalizedUrl.startsWith('http')) {
+    normalizedUrl = 'https://' + normalizedUrl;
+  }
+
+  // Tentative 1 : fetch direct avec headers navigateur
   try {
-    let normalizedUrl = url;
-    if (!normalizedUrl.startsWith('http')) {
-      normalizedUrl = 'https://' + normalizedUrl;
-    }
-    
     const response = await fetch(normalizedUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -75,34 +76,63 @@ async function fetchWebsite(url: string): Promise<string> {
         'Sec-Fetch-User': '?1',
       },
     });
-    
-    if (!response.ok) {
-      throw new Error('HTTP ' + response.status);
+
+    if (response.ok) {
+      const html = await response.text();
+      const cleanText = cleanHtml(html);
+      if (cleanText.length > 200) {
+        console.log('✅ Fetch direct OK');
+        return cleanText;
+      }
     }
-    
-    const html = await response.text();
-    
-    const cleanText = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .trim()
-      .slice(0, 15000);
-    
+    console.log(`⚠️ Fetch direct échoué (${response.status}), fallback Jina Reader...`);
+  } catch (e) {
+    console.log('⚠️ Fetch direct échoué, fallback Jina Reader...');
+  }
+
+  // Tentative 2 : Jina Reader (passe Cloudflare, WAF, etc.)
+  try {
+    const jinaResponse = await fetch(`https://r.jina.ai/${normalizedUrl}`, {
+      headers: {
+        'Accept': 'text/plain',
+      },
+    });
+
+    if (!jinaResponse.ok) {
+      throw new Error('Jina Reader: HTTP ' + jinaResponse.status);
+    }
+
+    const text = await jinaResponse.text();
+    const cleanText = text.trim().slice(0, 15000);
+
+    if (cleanText.length < 100) {
+      throw new Error('Contenu trop court');
+    }
+
+    console.log('✅ Jina Reader OK');
     return cleanText;
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Erreur fetch ' + url + ':', errorMessage);
-    throw new Error('Impossible de charger le site: ' + errorMessage);
+    console.error('❌ Jina Reader échoué:', errorMessage);
+    throw new Error('Impossible de charger le site: ' + url + ' (protégé contre le scraping)');
   }
+}
+
+function cleanHtml(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .trim()
+    .slice(0, 15000);
 }
 
 // ── Étape 2a : Analyser le site (sans générer de prompts) ──
