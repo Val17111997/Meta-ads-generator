@@ -289,7 +289,19 @@ export default function Home() {
   async function compressImage(b64: string): Promise<string> {
     return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d')!; let w = img.width, h = img.height; const m = 600; if (w>h&&w>m) { h=(h*m)/w; w=m; } else if (h>m) { w=(w*m)/h; h=m; } c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',0.5)); }; img.onerror = () => res(b64); img.src = b64; });
   }
-  function downloadSingle(url: string, ts: number) { try { const a = document.createElement('a'); a.href=url; a.download=`meta-ad-${ts}.${url.startsWith('data:video')?'mp4':'png'}`; document.body.appendChild(a); a.click(); document.body.removeChild(a); } catch {} }
+  async function downloadSingle(url: string, ts: number) {
+    try {
+      const isVideo = url.startsWith('data:video') || url.endsWith('.mp4');
+      const ext = isVideo ? 'mp4' : 'png';
+      if (url.startsWith('data:')) {
+        const a = document.createElement('a'); a.href = url; a.download = `meta-ad-${ts}.${ext}`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      } else {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `meta-ad-${ts}.${ext}`; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }
+    } catch {}
+  }
   function downloadAll() { if (generatedImages.length) createAndDownloadZip(generatedImages, batchCount); }
   function clearGallery() {
     if (confirm('Vider la galerie ?')) {
@@ -304,7 +316,37 @@ export default function Home() {
   }
   function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','batchCount','videoPolling','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'all' }) }).catch(() => {}); } }
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
-    try { const zip = new JSZip(); images.forEach((m,i) => { const v = m.mediaType==='video'||m.url.startsWith('data:video'); zip.file(`${v?'video':'image'}-${i+1}.${v?'mp4':'png'}`, m.url.split(',')[1], { base64: true }); }); const blob = await zip.generateAsync({ type: 'blob' }); const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`content-batch-${batch}.zip`; document.body.appendChild(a); a.click(); document.body.removeChild(a); return true; } catch { return false; }
+    try {
+      const zip = new JSZip();
+      for (let i = 0; i < images.length; i++) {
+        const m = images[i];
+        const v = m.mediaType === 'video' || m.url.startsWith('data:video') || m.url.endsWith('.mp4');
+        const ext = v ? 'mp4' : 'png';
+        const fileName = `${v ? 'video' : 'image'}-${i + 1}.${ext}`;
+
+        if (m.url.startsWith('data:')) {
+          // Base64 data URL (legacy or edited images)
+          zip.file(fileName, m.url.split(',')[1], { base64: true });
+        } else {
+          // Remote URL (Supabase Storage) — fetch the blob
+          try {
+            const resp = await fetch(m.url);
+            const blob = await resp.blob();
+            zip.file(fileName, blob);
+          } catch (e) {
+            console.warn(`⚠️ Impossible de télécharger: ${m.url}`);
+          }
+        }
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `content-batch-${batch}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return true;
+    } catch { return false; }
   }
 
   const totalAssets = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
@@ -621,7 +663,8 @@ export default function Home() {
             <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Nom du groupe…" className="w-full px-4 py-2.5 border border-gray-300 rounded-lg mb-4 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 text-sm" onKeyDown={e => e.key==='Enter' && createNewGroup()} autoFocus />
             <div className="flex gap-2">
               <button onClick={createNewGroup} className="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-semibold">Créer</button>
-              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium">Annuler</button>            </div>
+              <button onClick={() => { setShowNewGroupModal(false); setNewGroupName(''); }} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium">Annuler</button>
+            </div>
           </div>
         </div>
       )}
