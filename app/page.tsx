@@ -315,7 +315,12 @@ export default function Home() {
     }
   }
   function clearAllData() { if (confirm('Tout réinitialiser ?')) { setProductGroups({}); setProductGroupUrls({}); setBrandAssets([]); setGeneratedImages([]); setCurrentImage(null); setCurrentPrompt(''); setBatchCount(1); setVideoPolling(null); setFavorites([]); ['productGroups','productGroupUrls','brandAssets','batchCount','videoPolling','siteAnalyzerState'].forEach(k => localStorage.removeItem(k)); fetch('/api/favorites', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'all' }) }).catch(() => {}); } }
+  const [zippingGallery, setZippingGallery] = useState(false);
+  const [zipProgress, setZipProgress] = useState('');
+
   async function createAndDownloadZip(images: typeof generatedImages, batch: number) {
+    setZippingGallery(true);
+    setZipProgress(`📦 Préparation (0/${images.length})...`);
     try {
       const zip = new JSZip();
       for (let i = 0; i < images.length; i++) {
@@ -323,12 +328,11 @@ export default function Home() {
         const v = m.mediaType === 'video' || m.url.startsWith('data:video') || m.url.endsWith('.mp4');
         const ext = v ? 'mp4' : 'png';
         const fileName = `${v ? 'video' : 'image'}-${i + 1}.${ext}`;
+        setZipProgress(`📦 ${i + 1}/${images.length} fichiers...`);
 
         if (m.url.startsWith('data:')) {
-          // Base64 data URL (legacy or edited images)
           zip.file(fileName, m.url.split(',')[1], { base64: true });
         } else {
-          // Remote URL (Supabase Storage) — fetch the blob
           try {
             const resp = await fetch(m.url);
             const blob = await resp.blob();
@@ -338,6 +342,7 @@ export default function Home() {
           }
         }
       }
+      setZipProgress('📦 Compression...');
       const blob = await zip.generateAsync({ type: 'blob' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -345,8 +350,10 @@ export default function Home() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      setZipProgress('');
       return true;
-    } catch { return false; }
+    } catch { setZipProgress(''); return false; }
+    finally { setZippingGallery(false); }
   }
 
   const totalAssets = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
@@ -528,7 +535,7 @@ export default function Home() {
                 <div><h2 className="text-2xl font-bold text-gray-800 tracking-tight">Studio créatif</h2><p className="text-gray-400 text-sm mt-1">{generatedImages.length} médias • {favorites.length} favoris</p></div>
                 {generatedImages.length > 0 && (
                   <div className="flex gap-2">
-                    <button onClick={downloadAll} className="px-4 py-2 bg-violet-50 text-violet-600 text-sm rounded-lg font-semibold hover:bg-violet-100 border border-violet-200">📦 ZIP</button>
+                    <button onClick={downloadAll} disabled={zippingGallery} className="px-4 py-2 bg-violet-50 text-violet-600 text-sm rounded-lg font-semibold hover:bg-violet-100 border border-violet-200 disabled:opacity-50 disabled:cursor-wait">{zippingGallery ? zipProgress || '⏳ ZIP...' : '📦 ZIP'}</button>
                     <button onClick={clearGallery} className="px-4 py-2 bg-red-50 text-red-500 text-sm rounded-lg font-semibold hover:bg-red-100 border border-red-200">🗑️ Vider</button>
                   </div>
                 )}
