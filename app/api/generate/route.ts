@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 function getSupabase() {
@@ -272,21 +272,23 @@ async function generateWithProductImage(
       };
     });
 
-  let textInstructions = shouldIncludeText
-    ? '\n\nTEXT OVERLAY:\n- Add compelling French marketing text overlay on the image\n- Include catchy headlines, product benefits, or promotional messages\n- Use modern, readable typography\n- Ensure text is clearly visible and well-positioned\n- ALL text in the image MUST be in FRENCH.'
-    : '\n\nCRITICAL — ABSOLUTELY NO TEXT:\n- DO NOT add ANY text, words, letters, numbers, characters, watermarks, captions, headlines, labels, or typography anywhere on the image\n- This is the MOST IMPORTANT rule: the image must contain ZERO text of any kind\n- No brand names, no slogans, no prices, no hashtags, no URLs — NOTHING written\n- If you include any text at all, the image will be rejected\n- Pure visual composition only';
-  
-  let brandInstructions = '';
-  const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
-  const hasPalette = brandAssetsData.some(a => a.type === 'palette');
-  const hasStyle = brandAssetsData.some(a => a.type === 'style');
+      const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
+      const hasPalette = brandAssetsData.some(a => a.type === 'palette');
+      const hasStyle = brandAssetsData.some(a => a.type === 'style');
 
-  if (hasLogo || hasPalette || hasStyle) {
-    brandInstructions = '\n\nBRAND CONSISTENCY GUIDELINES:';
-    if (hasLogo) brandInstructions += '\n- Logo provided: Incorporate the brand logo naturally.';
-    if (hasPalette) brandInstructions += '\n- Color palette reference provided: Use these EXACT colors.';
-    if (hasStyle) brandInstructions += '\n- Visual style references provided: Match the aesthetic feel.';
-  }
+      let textBlock = '';
+      if (shouldIncludeText) {
+        textBlock = '\nInclude text overlays as described in the prompt. ALL text MUST be in FRENCH. Use modern, readable typography.';
+      } else {
+        textBlock = '\nDo NOT add any text, words, headlines, labels or typography on the image. Ignore any text/headline/CTA instructions in the prompt. Pure visual only.';
+      }
+
+      let brandBlock = '';
+      if (hasLogo) brandBlock += ' Incorporate the brand logo naturally.';
+      if (hasPalette) brandBlock += ' Match the provided color palette.';
+      if (hasStyle) brandBlock += ' Match the visual style references.';
+
+      const finalPrompt = `${prompt}.${textBlock}${brandBlock ? '\n' + brandBlock.trim() : ''}\nKeep the product faithful to the reference images.`;
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const keyIndex = (startIndex + attempt) % apiKeys.length;
@@ -304,23 +306,14 @@ async function generateWithProductImage(
                 ...productParts,
                 ...brandParts,
                 { 
-                  text: `Create a professional Meta ad image. ${prompt}. 
-
-CRITICAL PRODUCT RULES:
-- The product(s) in the provided image(s) MUST be clearly visible and recognizable
-- NEVER deform, distort, or modify the product's shape, proportions, labels, or branding
-- Keep the product EXACTLY as shown in the reference images
-${textInstructions}
-${brandInstructions}
-
-Professional marketing photography. High quality. Eye-catching for social media.`
+                  text: finalPrompt
                 }
               ]
             }],
             generationConfig: {
               imageConfig: { 
                 aspectRatio: format,
-                imageSize: '2K'
+                imageSize: '4K'
               }
             }
           }),
