@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 function getSupabase() {
@@ -244,7 +244,8 @@ async function generateWithProductImage(
   brandAssetsData: { url: string; type: 'logo' | 'palette' | 'style' }[] = [],
   shouldIncludeLogo: boolean = false,
   shouldIncludeText: boolean = true,
-  format: string = '1:1', 
+  format: string = '1:1',
+  brandColors: string = '',
 ) {
   const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim()).filter(Boolean);
   const maxAttempts = Math.max(apiKeys.length, 5); // Au moins 5 tentatives (503 sont temporaires)
@@ -261,6 +262,7 @@ async function generateWithProductImage(
   });
 
   const brandParts = brandAssetsData
+    .filter(asset => asset.type !== 'palette') // palette is now text-based, not an image
     .filter(asset => shouldIncludeLogo ? true : asset.type !== 'logo')
     .map(asset => {
       const base64Data = asset.url.split(',')[1] || asset.url;
@@ -273,8 +275,8 @@ async function generateWithProductImage(
     });
 
       const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
-      const hasPalette = brandAssetsData.some(a => a.type === 'palette');
       const hasStyle = brandAssetsData.some(a => a.type === 'style');
+      const hasRefImages = productImagesBase64.length > 0;
 
       let textBlock = '';
       if (shouldIncludeText) {
@@ -285,10 +287,14 @@ async function generateWithProductImage(
 
       let brandBlock = '';
       if (hasLogo) brandBlock += ' Incorporate the brand logo naturally.';
-      if (hasPalette) brandBlock += ' Match the provided color palette.';
+      if (brandColors) brandBlock += ` Use these brand colors: ${brandColors}.`;
       if (hasStyle) brandBlock += ' Match the visual style references.';
 
-      const finalPrompt = `${prompt}.${textBlock}${brandBlock ? '\n' + brandBlock.trim() : ''}\nKeep the product faithful to the reference images.`;
+      const refBlock = hasRefImages
+        ? '\nKeep the product/subject faithful to the reference images.'
+        : '';
+
+      const finalPrompt = `${prompt}.${textBlock}${brandBlock ? '\n' + brandBlock.trim() : ''}${refBlock}`;
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const keyIndex = (startIndex + attempt) % apiKeys.length;
@@ -497,7 +503,7 @@ async function generateVideoWithKling(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { productGroups = {}, brandAssets = [], includeText = true, includeLogo = false, videoEngine = 'veo' } = body;
+    const { productGroups = {}, brandAssets = [], brandColors = '', includeText = true, includeLogo = false, videoEngine = 'veo' } = body;
     
     const clientId = process.env.CLIENT_ID;
     if (!clientId) {
@@ -738,7 +744,8 @@ export async function POST(request: Request) {
       brandAssets, 
       includeLogo,
       includeText,
-      format
+      format,
+      brandColors
     );
 
     // Upload to Supabase Storage instead of returning base64

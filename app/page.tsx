@@ -40,6 +40,7 @@ export default function Home() {
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [brandAssets, setBrandAssets] = useState<{ name: string; url: string; type: 'logo' | 'palette' | 'style' }[]>([]);
+  const [brandColors, setBrandColors] = useState('');
   const [uploadingBrand, setUploadingBrand] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<{ url: string; prompt: string; timestamp: number; mediaType?: string; fileName?: string }[]>([]);
   const [batchCount, setBatchCount] = useState(1);
@@ -109,6 +110,7 @@ export default function Home() {
   useEffect(() => { if (Object.keys(productGroups).length > 0) { try { localStorage.setItem('productGroups', JSON.stringify(productGroups)); } catch (e) { console.warn('⚠️ localStorage plein (productGroups)'); } } }, [productGroups]);
   useEffect(() => { Object.keys(productGroupUrls).length > 0 ? localStorage.setItem('productGroupUrls', JSON.stringify(productGroupUrls)) : localStorage.removeItem('productGroupUrls'); }, [productGroupUrls]);
   useEffect(() => { if (brandAssets.length > 0) { try { localStorage.setItem('brandAssets', JSON.stringify(brandAssets)); } catch { console.warn('⚠️ localStorage plein (brandAssets)'); } } }, [brandAssets]);
+  useEffect(() => { brandColors ? localStorage.setItem('brandColors', brandColors) : localStorage.removeItem('brandColors'); }, [brandColors]);
   // ── Gallery: save metadata to Supabase (image already in Storage via route.ts) ──
   async function saveToGallery(imageUrl: string, prompt: string, mediaType: string = 'image') {
     try {
@@ -154,6 +156,7 @@ export default function Home() {
     loadFavorites();
     const r = (k: string, s: (v: any) => void) => { const v = localStorage.getItem(k); if (v) try { s(JSON.parse(v)); } catch { localStorage.removeItem(k); } };
     r('productGroups', setProductGroups); r('productGroupUrls', setProductGroupUrls); r('brandAssets', setBrandAssets); r('videoPolling', setVideoPolling);
+    const bc = localStorage.getItem('brandColors'); if (bc) setBrandColors(bc);
     const b = localStorage.getItem('batchCount'); if (b) setBatchCount(parseInt(b));
   }, []);
 
@@ -212,7 +215,7 @@ export default function Home() {
         const shuffled = [...imgs].sort(() => Math.random() - 0.5);
         return [n, shuffled.slice(0, Math.ceil(max/Object.keys(productGroups).length))];
       }));
-      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.filter(a => includeLogo ? true : a.type !== 'logo').slice(0, 3).map(a => ({ url: a.url, type: a.type })), includeText, includeLogo, videoEngine: 'veo' }) });
+      const { ok, data } = await safeFetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', productGroups: lg, brandAssets: brandAssets.filter(a => includeLogo ? true : a.type !== 'logo').slice(0, 3).map(a => ({ url: a.url, type: a.type })), brandColors, includeText, includeLogo, videoEngine: 'veo' }) });
       if (!ok) {
         const m = data?.message||data?.error||'';
         if (m.includes('Aucun prompt')||m.includes('en attente')) { setError('✅ Tous les prompts ont été générés !'); setAutoMode(false); }
@@ -287,7 +290,7 @@ export default function Home() {
 
   // ── Utils ──
   async function compressImage(b64: string): Promise<string> {
-    return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d')!; let w = img.width, h = img.height; const m = 400; if (w>h&&w>m) { h=(h*m)/w; w=m; } else if (h>m) { w=(w*m)/h; h=m; } c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',0.4)); }; img.onerror = () => res(b64); img.src = b64; });
+    return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'), ctx = c.getContext('2d')!; let w = img.width, h = img.height; const m = 600; if (w>h&&w>m) { h=(h*m)/w; w=m; } else if (h>m) { w=(w*m)/h; h=m; } c.width=w; c.height=h; ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',0.7)); }; img.onerror = () => res(b64); img.src = b64; });
   }
   async function downloadSingle(url: string, ts: number) {
     try {
@@ -506,23 +509,48 @@ export default function Home() {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold text-gray-700">🎨 Charte graphique</h3>
-                    {brandAssets.length > 0 && <button onClick={clearBrandAssets} className="px-3 py-1.5 bg-red-50 text-red-500 text-xs rounded-lg font-semibold hover:bg-red-100 border border-red-200">Vider</button>}
+                    {(brandAssets.length > 0 || brandColors) && <button onClick={() => { clearBrandAssets(); setBrandColors(''); }} className="px-3 py-1.5 bg-red-50 text-red-500 text-xs rounded-lg font-semibold hover:bg-red-100 border border-red-200">Vider</button>}
                   </div>
                   <div className="space-y-3">
-                    {[{t:'logo' as const,l:'🏷️ Logo',d:'Logo PNG transparent'},{t:'palette' as const,l:'🎨 Palette',d:'Palette couleurs'},{t:'style' as const,l:'✨ Moodboard',d:'Exemples visuels'}].map(({t,l,d}) => (
-                      <div key={t} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div><span className="font-medium text-sm text-gray-700">{l}</span><p className="text-xs text-gray-400">{d}</p></div>
-                        <div className="flex items-center gap-2">
-                          {brandAssets.filter(a => a.type===t).map((a,i) => (
-                            <div key={i} className="relative group w-10 h-10 rounded-md overflow-hidden border border-gray-200">
-                              <img src={a.url} alt={a.name} className="w-full h-full object-cover" />
-                              <button onClick={() => deleteBrandAsset(a.name)} className="absolute inset-0 bg-red-500/70 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                            </div>
-                          ))}
-                          <label className="px-3 py-1.5 bg-violet-50 text-violet-600 text-xs rounded-lg cursor-pointer hover:bg-violet-100 font-medium border border-violet-200">+<input type="file" className="hidden" accept="image/*" multiple onChange={e => handleBrandAssetUpload(e,t)} /></label>
-                        </div>
+                    {/* Logo */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div><span className="font-medium text-sm text-gray-700">🏷️ Logo</span><p className="text-xs text-gray-400">Logo PNG transparent</p></div>
+                      <div className="flex items-center gap-2">
+                        {brandAssets.filter(a => a.type==='logo').map((a,i) => (
+                          <div key={i} className="relative group w-10 h-10 rounded-md overflow-hidden border border-gray-200">
+                            <img src={a.url} alt={a.name} className="w-full h-full object-cover" />
+                            <button onClick={() => deleteBrandAsset(a.name)} className="absolute inset-0 bg-red-500/70 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                          </div>
+                        ))}
+                        <label className="px-3 py-1.5 bg-violet-50 text-violet-600 text-xs rounded-lg cursor-pointer hover:bg-violet-100 font-medium border border-violet-200">+<input type="file" className="hidden" accept="image/*" multiple onChange={e => handleBrandAssetUpload(e,'logo')} /></label>
                       </div>
-                    ))}
+                    </div>
+                    {/* Couleurs */}
+                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <div><span className="font-medium text-sm text-gray-700">🎨 Couleurs</span><p className="text-xs text-gray-400">Codes hex ou noms de couleurs</p></div>
+                      </div>
+                      <input
+                        type="text"
+                        value={brandColors}
+                        onChange={e => setBrandColors(e.target.value)}
+                        placeholder="Ex: #7C3AED, #F5F0FF, noir, doré..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                      />
+                    </div>
+                    {/* Moodboard */}
+                    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div><span className="font-medium text-sm text-gray-700">✨ Moodboard</span><p className="text-xs text-gray-400">Exemples visuels d'inspiration</p></div>
+                      <div className="flex items-center gap-2">
+                        {brandAssets.filter(a => a.type==='style').map((a,i) => (
+                          <div key={i} className="relative group w-10 h-10 rounded-md overflow-hidden border border-gray-200">
+                            <img src={a.url} alt={a.name} className="w-full h-full object-cover" />
+                            <button onClick={() => deleteBrandAsset(a.name)} className="absolute inset-0 bg-red-500/70 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                          </div>
+                        ))}
+                        <label className="px-3 py-1.5 bg-violet-50 text-violet-600 text-xs rounded-lg cursor-pointer hover:bg-violet-100 font-medium border border-violet-200">+<input type="file" className="hidden" accept="image/*" multiple onChange={e => handleBrandAssetUpload(e,'style')} /></label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

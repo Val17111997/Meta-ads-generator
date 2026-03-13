@@ -30,6 +30,9 @@ export default function FavoritesPanel({ favorites, loading, onRemove, onClearAl
   const [variantCount, setVariantCount] = useState(10);
   const [contentType, setContentType] = useState<'photo' | 'video' | 'both'>('both');
   const [editingFav, setEditingFav] = useState<FavoriteItem | null>(null);
+  const [resizingFav, setResizingFav] = useState<FavoriteItem | null>(null);
+  const [resizeFormat, setResizeFormat] = useState('9:16');
+  const [resizing, setResizing] = useState(false);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -154,6 +157,57 @@ export default function FavoritesPanel({ favorites, loading, onRemove, onClearAl
       setStatus(`❌ ${error.message}`);
     } finally {
       setGenerating(false);
+      setTimeout(() => setStatus(''), 5000);
+    }
+  };
+
+  const adaptFormat = async (fav: FavoriteItem, targetFormat: string) => {
+    setResizing(true);
+    setStatus(`📐 Adaptation en ${targetFormat}...`);
+    try {
+      // Fetch the image as base64 if it's a URL
+      let imageBase64 = fav.url;
+      if (!fav.url.startsWith('data:')) {
+        const resp = await fetch(fav.url);
+        const blob = await resp.blob();
+        imageBase64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      const safeZoneNote = targetFormat === '9:16'
+        ? ' CRITICAL: This is for Instagram/TikTok Stories. Keep ALL important content (product, text, key visuals) in the center 60% of the frame. Leave the top 15% and bottom 25% as safe zones with only background — no text, no product, no important elements in these areas.'
+        : targetFormat === '16:9'
+        ? ' Keep all important content away from the extreme edges of the frame.'
+        : '';
+
+      const response = await fetch('/api/generate-resize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceImage: imageBase64,
+          prompt: fav.prompt,
+          targetFormat,
+          safeZoneNote,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.imageUrl) {
+        if (onSaveEdited) {
+          onSaveEdited(data.imageUrl, fav.prompt + ` (${targetFormat})`);
+        }
+        setStatus(`✅ Créa adaptée en ${targetFormat} !`);
+      } else {
+        setStatus(`❌ ${data.error || 'Erreur lors de l\'adaptation'}`);
+      }
+    } catch (error: any) {
+      setStatus(`❌ ${error.message}`);
+    } finally {
+      setResizing(false);
+      setResizingFav(null);
       setTimeout(() => setStatus(''), 5000);
     }
   };
@@ -323,6 +377,15 @@ export default function FavoritesPanel({ favorites, loading, onRemove, onClearAl
                   <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     {fav.mediaType !== 'video' && (
                       <button
+                        onClick={(e) => { e.stopPropagation(); setResizingFav(fav); }}
+                        className="bg-blue-500 hover:bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                        title="Adapter le format"
+                      >
+                        📐
+                      </button>
+                    )}
+                    {fav.mediaType !== 'video' && (
+                      <button
                         onClick={(e) => { e.stopPropagation(); setEditingFav(fav); }}
                         className="bg-violet-500 hover:bg-violet-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
                       >
@@ -362,6 +425,57 @@ export default function FavoritesPanel({ favorites, loading, onRemove, onClearAl
             setEditingFav(null);
           }}
         />
+      )}
+
+      {/* Resize Format Modal */}
+      {resizingFav && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[70]" onClick={() => setResizingFav(null)}>
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl border border-gray-200" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold mb-2 text-gray-700">📐 Adapter le format</h3>
+            <p className="text-xs text-gray-400 mb-4">La créa sera régénérée dans le nouveau format en respectant les zones mortes.</p>
+            
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {[
+                { value: '1:1', label: 'Carré', icon: '⬜' },
+                { value: '9:16', label: 'Story', icon: '📱' },
+                { value: '4:5', label: 'Portrait', icon: '📋' },
+                { value: '16:9', label: 'Paysage', icon: '🖥️' },
+                { value: '2:3', label: '2:3', icon: '📄' },
+                { value: '3:2', label: '3:2', icon: '🖼️' },
+              ].map(f => (
+                <button
+                  key={f.value}
+                  onClick={() => setResizeFormat(f.value)}
+                  className={`p-3 rounded-lg text-center transition-all border-2 ${
+                    resizeFormat === f.value
+                      ? 'border-violet-500 bg-violet-50 text-violet-700'
+                      : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="text-lg mb-1">{f.icon}</div>
+                  <div className="text-xs font-semibold">{f.label}</div>
+                  <div className="text-[10px] text-gray-400">{f.value}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => adaptFormat(resizingFav, resizeFormat)}
+                disabled={resizing}
+                className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-wait"
+              >
+                {resizing ? '⏳ Génération...' : `Adapter en ${resizeFormat}`}
+              </button>
+              <button
+                onClick={() => setResizingFav(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-sm font-medium"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
