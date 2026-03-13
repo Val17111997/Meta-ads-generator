@@ -526,10 +526,7 @@ export async function POST(request: Request) {
 
     const totalImages = Object.values(productGroups).reduce((sum: number, imgs: any) => sum + imgs.length, 0);
     if (totalImages === 0) {
-      return NextResponse.json({ 
-        success: false,
-        error: 'Aucune image produit. Crée un groupe et upload des images !' 
-      }, { status: 400 });
+      console.log('📂 Aucune image produit — génération sans référence visuelle');
     }
     
     const { data: pendingPrompts, error: fetchError } = await getSupabase()
@@ -585,10 +582,7 @@ export async function POST(request: Request) {
     }
     
     if (selectedImages.length === 0) {
-      return NextResponse.json({ 
-        success: false,
-        message: 'Aucune image disponible pour ce produit' 
-      });
+      console.log('📂 Aucune image sélectionnée — génération sans référence visuelle');
     }
     
     const validFormats = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];

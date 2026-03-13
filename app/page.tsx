@@ -205,8 +205,6 @@ export default function Home() {
 
   async function generateSingle() {
     if (isGenerating) return;
-    const tot = Object.values(productGroups).reduce((s,i) => s+i.length, 0);
-    if (tot === 0) { setError('📸 Aucune image produit uploadée. Va dans l\'onglet Assets, crée un groupe de produits et ajoute des photos.'); setTimeout(() => setError(null), 8000); return; }
     setIsGenerating(true); setError(null); addLog('🎨 Génération…');
     try {
       const max = 4;
