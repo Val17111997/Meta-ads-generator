@@ -165,18 +165,6 @@ export default function FavoritesPanel({ favorites, loading, onRemove, onClearAl
     setResizing(true);
     setStatus(`📐 Adaptation en ${targetFormat}...`);
     try {
-      // Fetch the image as base64 if it's a URL
-      let imageBase64 = fav.url;
-      if (!fav.url.startsWith('data:')) {
-        const resp = await fetch(fav.url);
-        const blob = await resp.blob();
-        imageBase64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-      }
-
       const safeZoneNote = targetFormat === '9:16'
         ? ' CRITICAL: This is for Instagram/TikTok Stories. Keep ALL important content (product, text, key visuals) in the center 60% of the frame. Leave the top 15% and bottom 25% as safe zones with only background — no text, no product, no important elements in these areas.'
         : targetFormat === '16:9'
@@ -187,7 +175,7 @@ export default function FavoritesPanel({ favorites, loading, onRemove, onClearAl
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceImage: imageBase64,
+          sourceImageUrl: fav.url,
           prompt: fav.prompt,
           targetFormat,
           safeZoneNote,

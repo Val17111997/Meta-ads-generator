@@ -18,9 +18,9 @@ function getSupabase() {
 
 export async function POST(request: Request) {
   try {
-    const { sourceImage, prompt, targetFormat, safeZoneNote = '' } = await request.json();
+    const { sourceImageUrl, sourceImage, prompt, targetFormat, safeZoneNote = '' } = await request.json();
 
-    if (!sourceImage) {
+    if (!sourceImageUrl && !sourceImage) {
       return NextResponse.json({ success: false, error: 'Image source manquante' }, { status: 400 });
     }
 
@@ -33,7 +33,20 @@ export async function POST(request: Request) {
     const startIndex = Math.floor(Math.random() * apiKeys.length);
     const maxAttempts = Math.max(apiKeys.length, 3);
 
-    const base64Data = sourceImage.includes(',') ? sourceImage.split(',')[1] : sourceImage;
+    // Get base64 data — either from URL (fetch server-side) or from direct base64
+    let base64Data: string;
+    if (sourceImage && sourceImage.startsWith('data:')) {
+      base64Data = sourceImage.split(',')[1];
+    } else {
+      const imageUrl = sourceImageUrl || sourceImage;
+      console.log(`📥 Fetching image from: ${imageUrl.substring(0, 80)}...`);
+      const imgResponse = await fetch(imageUrl);
+      if (!imgResponse.ok) {
+        return NextResponse.json({ success: false, error: 'Impossible de télécharger l\'image source' }, { status: 400 });
+      }
+      const imgBuffer = await imgResponse.arrayBuffer();
+      base64Data = Buffer.from(imgBuffer).toString('base64');
+    }
 
     const adaptPrompt = `Recreate this EXACT same image but adapted to a ${targetFormat} aspect ratio.
 
