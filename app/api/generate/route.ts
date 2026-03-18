@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 function getSupabase() {
@@ -282,7 +282,7 @@ async function generateWithProductImage(
       if (shouldIncludeText) {
         textBlock = '\nInclude text overlays as described in the prompt. ALL text MUST be in FRENCH. Use modern, readable typography.';
       } else {
-        textBlock = '\nDo NOT add any text, words, headlines, labels or typography on the image. Ignore any text/headline/CTA instructions in the prompt. Pure visual only.';
+        textBlock = '\nDo NOT add any extra text, headlines, captions, slogans, or typography overlays on the image. However, PRESERVE all existing text on product packaging, labels, and branding exactly as shown in the reference images — those are part of the product and must remain unchanged.';
       }
 
       let brandBlock = '';

@@ -324,25 +324,37 @@ export default function Home() {
     setZipProgress(`📦 Préparation (0/${images.length})...`);
     try {
       const zip = new JSZip();
-      for (let i = 0; i < images.length; i++) {
-        const m = images[i];
-        const v = m.mediaType === 'video' || m.url.startsWith('data:video') || m.url.endsWith('.mp4');
-        const ext = v ? 'mp4' : 'png';
-        const fileName = `${v ? 'video' : 'image'}-${i + 1}.${ext}`;
-        setZipProgress(`📦 ${i + 1}/${images.length} fichiers...`);
+      
+      // Download images in parallel batches of 5
+      const batchSize = 5;
+      for (let start = 0; start < images.length; start += batchSize) {
+        const batchImages = images.slice(start, start + batchSize);
+        const promises = batchImages.map(async (m, j) => {
+          const i = start + j;
+          const v = m.mediaType === 'video' || m.url.startsWith('data:video') || m.url.endsWith('.mp4');
+          const ext = v ? 'mp4' : 'png';
+          const fileName = `${v ? 'video' : 'image'}-${i + 1}.${ext}`;
 
-        if (m.url.startsWith('data:')) {
-          zip.file(fileName, m.url.split(',')[1], { base64: true });
-        } else {
-          try {
-            const resp = await fetch(m.url);
-            const blob = await resp.blob();
-            zip.file(fileName, blob);
-          } catch (e) {
-            console.warn(`⚠️ Impossible de télécharger: ${m.url}`);
+          if (m.url.startsWith('data:')) {
+            zip.file(fileName, m.url.split(',')[1], { base64: true });
+          } else {
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 15000);
+              const resp = await fetch(m.url, { signal: controller.signal });
+              clearTimeout(timeout);
+              const blob = await resp.blob();
+              zip.file(fileName, blob);
+            } catch (e) {
+              console.warn(`⚠️ Skip: ${m.url}`);
+            }
           }
-        }
+        });
+        
+        await Promise.all(promises);
+        setZipProgress(`📦 ${Math.min(start + batchSize, images.length)}/${images.length} fichiers...`);
       }
+
       setZipProgress('📦 Compression...');
       const blob = await zip.generateAsync({ type: 'blob' });
       const a = document.createElement('a');
