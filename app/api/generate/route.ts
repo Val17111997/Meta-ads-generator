@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-export const maxDuration = 60;
+export const maxDuration = 320;
 export const dynamic = 'force-dynamic';
 
 function getSupabase() {
