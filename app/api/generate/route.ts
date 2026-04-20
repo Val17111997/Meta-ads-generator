@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+export const runtime = 'nodejs';
+export const preferredRegion = 'cdg1'; // Paris
 export const maxDuration = 320;
 export const dynamic = 'force-dynamic';
 
