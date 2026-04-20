@@ -28,7 +28,6 @@ async function uploadToStorage(
   const mimeType = isVideo ? 'video/mp4' : 'image/png';
   const fileName = `${clientId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-  // Extract raw base64 data
   const base64Raw = base64DataUrl.includes(',') ? base64DataUrl.split(',')[1] : base64DataUrl;
   const buffer = Buffer.from(base64Raw, 'base64');
 
@@ -41,7 +40,6 @@ async function uploadToStorage(
 
   if (error) {
     console.error('⚠️ Storage upload error:', error.message);
-    // Fallback: return base64 if upload fails
     return base64DataUrl;
   }
 
@@ -59,8 +57,8 @@ async function generateVideoWithVeo(
   referenceImages: string[] = [],
 ): Promise<string | null> {
   const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim()).filter(Boolean);
-  const maxAttempts = apiKeys.length; // Tester CHAQUE clé une fois
-  const startIndex = Math.floor(Math.random() * apiKeys.length); // Round-robin distribué
+  const maxAttempts = apiKeys.length;
+  const startIndex = Math.floor(Math.random() * apiKeys.length);
 
   const aspectRatio = (format === '16:9' || format === '9:16') ? format : '9:16';
   const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
@@ -156,7 +154,6 @@ async function generateVideoWithVeo(
 
       console.log('✅ Opération Veo démarrée:', operation.name, `(clé #${keyIndex + 1})`);
 
-      // Polling inline (4 × 10s = 40s max)
       const maxPolls = 4;
       for (let poll = 1; poll <= maxPolls; poll++) {
         await new Promise(r => setTimeout(r, 10000));
@@ -236,7 +233,7 @@ async function generateVideoWithVeo(
 }
 
 // ============================================================
-// GÉNÉRATION IMAGE avec Gemini
+// GÉNÉRATION IMAGE avec Gemini (Nano Banana 2)
 // ============================================================
 async function generateWithProductImage(
   prompt: string, 
@@ -248,57 +245,78 @@ async function generateWithProductImage(
   brandColors: string = '',
 ) {
   const apiKeys = process.env.GOOGLE_API_KEY!.split(',').map(k => k.trim()).filter(Boolean);
-  const maxAttempts = Math.max(apiKeys.length, 5); // Au moins 5 tentatives (503 sont temporaires)
   const startIndex = Math.floor(Math.random() * apiKeys.length);
   
+  const globalDeadline = Date.now() + 280_000;
+  const REQUEST_TIMEOUT_MS = 60_000;
+  const MAX_ATTEMPTS_PER_KEY = 2;
+
   const productParts = productImagesBase64.map(imgBase64 => {
     const base64Data = imgBase64.split(',')[1] || imgBase64;
     return {
-      inlineData: { 
-        mimeType: 'image/png',
-        data: base64Data
-      }
+      inlineData: { mimeType: 'image/png', data: base64Data }
     };
   });
 
   const brandParts = brandAssetsData
-    .filter(asset => asset.type !== 'palette') // palette is now text-based, not an image
+    .filter(asset => asset.type !== 'palette')
     .filter(asset => shouldIncludeLogo ? true : asset.type !== 'logo')
     .map(asset => {
       const base64Data = asset.url.split(',')[1] || asset.url;
       return {
-        inlineData: { 
-          mimeType: 'image/png',
-          data: base64Data
-        }
+        inlineData: { mimeType: 'image/png', data: base64Data }
       };
     });
 
-      const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
-      const hasStyle = brandAssetsData.some(a => a.type === 'style');
-      const hasRefImages = productImagesBase64.length > 0;
+  const hasLogo = brandAssetsData.some(a => a.type === 'logo') && shouldIncludeLogo;
+  const hasStyle = brandAssetsData.some(a => a.type === 'style');
+  const hasRefImages = productImagesBase64.length > 0;
 
-      let textBlock = '';
-      if (shouldIncludeText) {
-        textBlock = '\nInclude text overlays as described in the prompt. ALL text MUST be in FRENCH. Use modern, readable typography.';
-      } else {
-        textBlock = '\nDo NOT add any extra text, headlines, captions, slogans, or typography overlays on the image. However, PRESERVE all existing text on product packaging, labels, and branding exactly as shown in the reference images — those are part of the product and must remain unchanged.';
-      }
+  let textBlock = '';
+  if (shouldIncludeText) {
+    textBlock = '\nInclude text overlays as described in the prompt. ALL text MUST be in FRENCH. Use modern, readable typography.';
+  } else {
+    textBlock = '\nDo NOT add any extra text, headlines, captions, slogans, or typography overlays on the image. However, PRESERVE all existing text on product packaging, labels, and branding exactly as shown in the reference images — those are part of the product and must remain unchanged.';
+  }
 
-      let brandBlock = '';
-      if (hasLogo) brandBlock += ' Incorporate the brand logo naturally.';
-      if (brandColors) brandBlock += ` Use these brand colors: ${brandColors}.`;
-      if (hasStyle) brandBlock += ' Match the visual style references.';
+  let brandBlock = '';
+  if (hasLogo) brandBlock += ' Incorporate the brand logo naturally.';
+  if (brandColors) brandBlock += ` Use these brand colors: ${brandColors}.`;
+  if (hasStyle) brandBlock += ' Match the visual style references.';
 
-      const refBlock = hasRefImages
-        ? '\nKeep the product/subject faithful to the reference images.'
-        : '';
+  const refBlock = hasRefImages
+    ? '\nKeep the product/subject faithful to the reference images.'
+    : '';
 
-      const finalPrompt = `${prompt}.${textBlock}${brandBlock ? '\n' + brandBlock.trim() : ''}${refBlock}`;
-  
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  const finalPrompt = `${prompt}.${textBlock}${brandBlock ? '\n' + brandBlock.trim() : ''}${refBlock}`;
+
+  const keyFailures = new Map<number, number>();
+  const totalAttempts = apiKeys.length * MAX_ATTEMPTS_PER_KEY;
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < totalAttempts; attempt++) {
+    const remaining = globalDeadline - Date.now();
+    if (remaining < REQUEST_TIMEOUT_MS) {
+      console.log(`⏰ Budget global épuisé (${remaining}ms restants), abandon`);
+      break;
+    }
+
     const keyIndex = (startIndex + attempt) % apiKeys.length;
     const apiKey = apiKeys[keyIndex];
+
+    if ((keyFailures.get(keyIndex) || 0) >= 3) {
+      continue;
+    }
+
+    const failures = keyFailures.get(keyIndex) || 0;
+    if (failures > 0) {
+      const backoffMs = Math.min(1000 * Math.pow(2, failures), 8000);
+      console.log(`⏳ Backoff ${backoffMs}ms pour clé #${keyIndex + 1} (${failures} échecs)`);
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
       const response = await fetch(
@@ -306,56 +324,76 @@ async function generateWithProductImage(
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             contents: [{
-              parts: [
-                ...productParts,
-                ...brandParts,
-                { 
-                  text: finalPrompt
-                }
-              ]
+              parts: [...productParts, ...brandParts, { text: finalPrompt }]
             }],
             generationConfig: {
-              imageConfig: { 
-                aspectRatio: format,
-                imageSize: '4K'
-              }
+              imageConfig: { aspectRatio: format, imageSize: '4K' }
             }
           }),
         }
       );
 
-      if (response.status === 503 || response.status === 429 || response.status === 500) {
-        console.log(`⚠️ Image: ${response.status} sur clé #${keyIndex + 1}, passage à la suivante...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      clearTimeout(timeoutId);
+
+      if ([500, 502, 503, 504, 429].includes(response.status)) {
+        keyFailures.set(keyIndex, failures + 1);
+        console.log(`⚠️ Image: ${response.status} sur clé #${keyIndex + 1} (échec ${failures + 1}/3)`);
+        lastError = new Error(`HTTP ${response.status}`);
         continue;
       }
 
       if (!response.ok) {
-        throw new Error(`Erreur API: ${response.status}`);
+        const errText = await response.text();
+        console.error(`❌ Erreur non-retryable ${response.status}:`, errText.substring(0, 300));
+        throw new Error(`API ${response.status}: ${errText.substring(0, 200)}`);
       }
 
       const data = await response.json();
       
       if (!data.candidates?.[0]?.content?.parts) {
-        throw new Error('Aucune image générée');
+        throw new Error('Aucune image générée (pas de candidates)');
       }
       
       const imagePart = data.candidates[0].content.parts.find((part: any) => part.inlineData);
       
       if (!imagePart?.inlineData?.data) {
+        const finishReason = data.candidates[0].finishReason;
+        if (finishReason && finishReason !== 'STOP') {
+          throw new Error(`Image bloquée: ${finishReason}`);
+        }
         throw new Error('Pas de données image dans la réponse');
       }
       
+      console.log(`✅ Image générée (clé #${keyIndex + 1}, tentative ${attempt + 1})`);
       return `data:image/png;base64,${imagePart.inlineData.data}`;
       
     } catch (error: any) {
-      if (attempt === maxAttempts - 1) throw error;
+      clearTimeout(timeoutId);
+      
+      if (error.name === 'AbortError') {
+        keyFailures.set(keyIndex, failures + 1);
+        console.log(`⏱️ Timeout ${REQUEST_TIMEOUT_MS}ms sur clé #${keyIndex + 1}`);
+        lastError = new Error('Request timeout');
+        continue;
+      }
+
+      if (error.message?.includes('API 4')) {
+        throw error;
+      }
+
+      keyFailures.set(keyIndex, failures + 1);
+      lastError = error;
+      console.log(`⚠️ Erreur clé #${keyIndex + 1}:`, error.message);
     }
   }
   
-  throw new Error('Échec après toutes les clés');
+  throw new Error(
+    `Gemini surchargé ou indisponible. Réessaie dans quelques minutes. ` +
+    `(Dernière erreur: ${lastError?.message || 'inconnue'})`
+  );
 }
 
 // ============================================================
@@ -520,7 +558,6 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
 
-    // Log des clés disponibles au démarrage
     const keyCount = process.env.GOOGLE_API_KEY.split(',').filter(k => k.trim()).length;
     console.log(`🔑 ${keyCount} clé(s) Google API configurée(s)`);
 
@@ -565,7 +602,6 @@ export async function POST(request: Request) {
     let selectedImages: string[] = [];
     
     if (productName && productGroups[productName]) {
-      // Shuffle to vary across product variants (different fragrances, colors, etc.)
       const shuffled = [...productGroups[productName]].sort(() => Math.random() - 0.5);
       selectedImages = shuffled.slice(0, 4).map((img: any) => img.url);
       console.log(`📂 Groupe sélectionné: "${productName}" (${selectedImages.length}/${productGroups[productName].length} images, aléatoire)`);
@@ -612,7 +648,6 @@ export async function POST(request: Request) {
       const engine = videoEngine || 'veo';
       console.log(`🎬 Démarrage génération vidéo avec ${engine.toUpperCase()}...`);
       
-      // ---- KLING ----
       if (engine === 'kling') {
         try {
           const klingResult = await generateVideoWithKling(prompt, format, selectedImages);
@@ -664,69 +699,68 @@ export async function POST(request: Request) {
         }
       }
       
-      // ---- VEO (seulement si sélectionné) ----
       if (engine === 'veo') {
-      try {
-        const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
+        try {
+          const videoUri = await generateVideoWithVeo(prompt, format, selectedImages);
 
-        await getSupabase()
-          .from('prompts')
-          .update({ 
-            status: 'generated',
-            image_url: 'Vidéo générée - voir app'
-          })
-          .eq('id', promptRow.id);
-
-        return NextResponse.json({
-          success: true,
-          mediaType: 'video',
-          imageUrl: videoUri,
-          prompt,
-          remaining: remainingCount,
-        });
-      } catch (videoError: any) {
-        if (videoError.message?.includes('bloqué par le filtre')) {
-          await getSupabase()
-            .from('prompts')
-            .update({ status: 'error', image_url: 'Bloqué par filtre sécurité' })
-            .eq('id', promptRow.id);
-
-          return NextResponse.json({
-            success: false,
-            error: '🚫 Ce prompt a été bloqué par le filtre de sécurité. Il a été marqué en erreur, relance pour passer au suivant.',
-            remaining: remainingCount,
-          });
-        }
-
-        const opMatch = videoError.message?.match(/operation:(.+?)(?:\s*\|.*)?$/);
-        if (opMatch) {
-          const fullMatch = opMatch[1].trim();
-          const keyIndexMatch = videoError.message?.match(/keyIndex:(\d+)/);
-          const keyIndex = keyIndexMatch ? parseInt(keyIndexMatch[1]) : 0;
-          const operationName = fullMatch.replace(/\s*\|.*$/, '').trim();
-          
           await getSupabase()
             .from('prompts')
             .update({ 
-              status: 'generating',
-              image_url: operationName
+              status: 'generated',
+              image_url: 'Vidéo générée - voir app'
             })
             .eq('id', promptRow.id);
 
           return NextResponse.json({
             success: true,
             mediaType: 'video',
-            videoOperation: operationName,
-            videoKeyIndex: keyIndex,
-            imageUrl: null,
+            imageUrl: videoUri,
             prompt,
             remaining: remainingCount,
-            message: 'Vidéo en cours — polling à reprendre',
           });
+        } catch (videoError: any) {
+          if (videoError.message?.includes('bloqué par le filtre')) {
+            await getSupabase()
+              .from('prompts')
+              .update({ status: 'error', image_url: 'Bloqué par filtre sécurité' })
+              .eq('id', promptRow.id);
+
+            return NextResponse.json({
+              success: false,
+              error: '🚫 Ce prompt a été bloqué par le filtre de sécurité. Il a été marqué en erreur, relance pour passer au suivant.',
+              remaining: remainingCount,
+            });
+          }
+
+          const opMatch = videoError.message?.match(/operation:(.+?)(?:\s*\|.*)?$/);
+          if (opMatch) {
+            const fullMatch = opMatch[1].trim();
+            const keyIndexMatch = videoError.message?.match(/keyIndex:(\d+)/);
+            const keyIndex = keyIndexMatch ? parseInt(keyIndexMatch[1]) : 0;
+            const operationName = fullMatch.replace(/\s*\|.*$/, '').trim();
+            
+            await getSupabase()
+              .from('prompts')
+              .update({ 
+                status: 'generating',
+                image_url: operationName
+              })
+              .eq('id', promptRow.id);
+
+            return NextResponse.json({
+              success: true,
+              mediaType: 'video',
+              videoOperation: operationName,
+              videoKeyIndex: keyIndex,
+              imageUrl: null,
+              prompt,
+              remaining: remainingCount,
+              message: 'Vidéo en cours — polling à reprendre',
+            });
+          }
+          throw videoError;
         }
-        throw videoError;
       }
-      } // fin if (engine === 'veo')
     }
 
     // ============================================================
@@ -742,7 +776,6 @@ export async function POST(request: Request) {
       brandColors
     );
 
-    // Upload to Supabase Storage instead of returning base64
     const mediaUrl = await uploadToStorage(mediaBase64, clientId, 'image');
     
     await getSupabase()
