@@ -332,7 +332,7 @@ async function generateWithProductImage(
               parts: [...productParts, ...brandParts, { text: finalPrompt }]
             }],
             generationConfig: {
-              imageConfig: { aspectRatio: format, imageSize: '4K' }
+              imageConfig: { aspectRatio: format }
             }
           }),
         }
